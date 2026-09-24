@@ -1,186 +1,222 @@
-<div align="center">
-  <img src="res/logo.png" width="128" height="128" alt="rapoo-tray logo" />
-  <h1>rapoo-tray</h1>
-  <p><b>雷柏VT系列游戏鼠标轻量化托盘程序</b></p>
+# razer-tray
 
-  <p>
-    <a href="https://github.com/Iris-0109/rapoo-tray/releases"><img src="https://img.shields.io/badge/Release-v1.2.1-blue?style=flat-square" alt="Release" /></a>
-    <img src="https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?style=flat-square&logo=windows" alt="Platform" />
-    <img src="https://img.shields.io/badge/Language-C%2B%2B17%20%2F%20Win32-00599C?style=flat-square&logo=c%2B%2B" alt="Language" />
-    <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
-  </p>
+<div align="center">
+  <img src="res/logo.png" width="120" height="120" alt="Razer 三头蛇标志" />
+  <h1>razer-tray</h1>
+  <p>常驻 Windows 托盘的雷蛇鼠标状态工具</p>
+  <p><b>连接状态 · 电量 · DPI · 轮询率</b></p>
 </div>
 
 ---
 
-## 💡 项目简介
+## 简介
 
-**rapoo-tray** 是面向雷柏（Rapoo）游戏鼠标用户的轻量化辅助工具。基于 C++17 与 Win32 API 编写，不依赖臃肿的第三方库，占用极低。程序支持以任务栏系统托盘独立运行，或作为插件集成至 [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor)，提供电量监测、DPI 显示、回报率调节、休眠配置等常用功能。
+`razer-tray` 是一个无窗口的托盘小工具：自动识别雷蛇（Razer）鼠标，读取并显示连接状态、
+电量、DPI 与轮询率，并在托盘图标上直接显示电量。
 
----
+它**只读取设备状态**，不下发 DPI、灯光、按键映射等设置命令，也不写入板载配置。
 
-## 🚀 v1.2.0 核心更新
+本项目由雷柏版本 [rapoo-tray](https://github.com/Iris-0109/rapoo-tray) 改造而来，设备层、
+遥测协议与图标渲染均为雷蛇专用实现，详见「灵感来源与致谢」。
 
-- **硬件兼容体系重构**：建立雷柏二代 Nordic 架构通用兼容机制，未打标机型自动归入通用模式，全功能 100% 完整支持；新增雷柏 VT3 MAX 型号识别。
-- **托盘电池个性化**：新增 3 种展示风格：
-  - **配置一（经典电池）**：采用14px，5x9 点阵高清字体，清晰醒目。
-  - **配置二（状态大圆点）**：极简纯净大号无数字圆点。
-  - **配置三（大号矢量数字）**：采用 4 倍超采样（SSAA）抗锯齿算法，字体无毛边。
-- **DPI 动态自适应屏幕悬浮窗 (OSD)**：
-  - 弃用固定宽框，改为毫秒级文本动态计算卡片宽度（`DT_CALCRECT`）。
-  - 三行精简架构：`设备全称 DPI 数值` / `X 轴与 Y 轴独立分辨率` / `连接模式 | 当前档位 | 电量 | 回报率`。
-  - 电量指示符号化：常规状态使用 `🔋`，充电中智能切换为 `⚡`。
-- **托盘右键面板**：菜单设计成Fluent 亚克力材质；新增回报率调节、休眠配置功能。
+## 下载
 
----
+- **直接用**：到 [Releases](https://github.com/XiaoKang0212/razer-tray/releases) 下载
+  `razer-tray.exe` 双击运行即可。免安装、绿色版、静态链接，不需要额外运行库，也不用管理员权限。
+- **自己编译**：源码仓库不包含编译产物，`bin/` 目录由构建脚本生成，见「构建」一节。
 
-## 📸 效果展示 (Showcase)
+## 功能
 
-| 任务栏托盘图标 (双击循环切换 3 种样式) | OSD 屏幕自适应悬浮窗 (支持 X/Y 轴独立显示) |
-| :---: | :---: |
-| <img src="docs/screenshots/battery_style_1.png" height="42" alt="配置一：经典电池" /> &nbsp;&nbsp; <img src="docs/screenshots/battery_style_2.png" height="42" alt="配置二：状态大圆点" /> &nbsp;&nbsp; <img src="docs/screenshots/battery_style_3.png" height="42" alt="配置三：大号数字" /><br><sub>配置一：经典电池 &nbsp;·&nbsp; 配置二：状态圆点 &nbsp;·&nbsp; 配置三：大号数字</sub> | <img src="docs/screenshots/osd.png" width="300" alt="OSD 屏幕自适应悬浮窗" /> |
+- **自动识别**：扫描 Razer USB VID `1532` 的 HID 控制接口（`0xFF00` 厂商接口，或承载 90/91 字节
+  Feature 报文的鼠标接口），无需选择设备。
+- **三种电量显示**：右键菜单「电量显示」可在 **环形电量 / 电池图标 / 数字显示** 之间切换，
+  选择结果写入注册表，重启后保持。
+- **环形样式**：中心三头蛇标志 + 外围电量环。整圈为绿色底环，较亮的弧段表示已用电量
+  （<30% 转橙色、<15% 转红色），中心保持透明、不填充底色；未连接时整体变暗。
+- **连接检测**：区分「接收器已插入」与「鼠标已开机」。鼠标电源关闭时显示
+  「接收器已就绪 · 鼠标未连接」，唤醒后自动恢复。
+- **点击即刷新**：单击（或双击）托盘图标会立即重新读取电量、DPI、轮询率并弹出 OSD；
+  右键打开菜单前同样先刷新一次。
+- **OSD 纯显示层**：点击会穿透到下方窗口，不会打断正在进行的拖拽或点击；外观与右键菜单一致
+  （同款亚克力背景 + 抗锯齿圆角与边框）。
+- **右键菜单**：显示型号与连接方式，以及电池电量 / 灵敏度 · DPI / 轮询率 / 电量显示 /
+  开机自启动 / 退出程序。
+- **诊断日志**：每次刷新写一行精简记录到 `%LOCALAPPDATA%\RazerTray\telemetry.log`，
+  读取失败时便于排查（菜单中不提供入口）。
 
-| 原生 Fluent 亚克力右键控制面板 | 2~120 分钟连续平滑休眠滑动条 |
-| :---: | :---: |
-| <img src="docs/screenshots/menu.png" width="220" alt="原生 Fluent 亚克力右键控制面板" /> | <img src="docs/screenshots/sleep_slider.png" width="260" alt="2~120 分钟连续平滑休眠滑动条" /> |
+## 截图
 
----
+三种电量显示方式（16 px 实际尺寸；每组上排深色任务栏、下排浅色，列依次为
+100% / 60% / 28% / 12% / 充电 / 未连接）：
 
-## 🖱️ 鼠标交互
+![三种电量样式](docs/tray-icon-styles.png)
 
-| 操作手势 | 响应动作 | 视觉反馈 |
-| :--- | :--- | :--- |
-| **鼠标左键单击** | 唤起屏幕右下角状态指示窗 | 弹出当前设备型号、DPI、双轴数值、电量与回报率 OSD |
-| **鼠标左键双击** | 循环切换托盘电池图标样式 | 在“配置一 (经典电池)”、“配置二 (圆点)”、“配置三 (大号数字)”间轮换，并弹出 OSD 提示 |
-| **鼠标右键单击** | 打开 Fluent 亚克力系统菜单 | 查看真实电量、调节回报率（125Hz~8000Hz）、调节休眠时间、切换开机自启 |
+OSD 状态提示：
 
----
+![OSD](docs/osd.png)
 
-## 🎯 功能特性
+右键菜单与「电量显示」子菜单：
 
-1. **极简轻量，原生低耗**：
-   - 纯 Win32 API 构建，无需 .NET / Electron / WebView 依赖。
-   - 运行时内存仅占用约 **20~30 MB**，空闲 CPU 占用不超过 **0.2%**。
-2. **多态电池托盘图标**：
-   - 智能四色指示：$\le 30\%$ 红色警示、$> 30\%$ 科技蓝/主题色、充电中翡翠绿、离线/休眠暗灰虚线或横杠。
-   - 配置与样式选择自动持久化保存于 Windows 注册表。
-3. **硬件级回报率与休眠控制**：
-   - 支持 125Hz、250Hz、500Hz、1000Hz（标准）及 2000Hz、4000Hz、8000Hz（电竞高刷）即时切换。
-   - 休眠时间支持从 2 分钟到 120 分钟连续拖动与滚轮步进微调，配置即刻下发至鼠标硬件内部寄存器。
-4. **开机自启**：
-   - 基于当前用户注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 实现，无需管理员权限，启动无弹窗干扰。
+![右键菜单](docs/menu.png)
 
----
+## 使用
 
-## 📋 支持设备列表 (Supported Devices)
+1. 运行 `bin\razer-tray.exe`，程序无主窗口，直接驻留通知区域。
+2. **单击 / 双击**托盘图标：立即刷新并显示状态 OSD。
+3. **右键**托盘图标：打开菜单（打开前会自动刷新一次）。
+4. 菜单中的「开机自启动」写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`。
 
-| 设备型号 | 连接模式 | VID | PID | 支持状态 |
-| :--- | :--- | :--- | :--- | :---: |
-| **雷柏 VT7 系列** | 2.4G 无线接收器 | `0x24AE` | `0x1460` | ✅ 开发者实测支持 |
-| **雷柏 VT7 系列** | USB 有线直连 | `0x24AE` | `0x4660` | ✅ 开发者实测支持 |
-| **雷柏 VT3S 系列** | 2.4G 无线接收器 | `0x24AE` | `0x1406` / `0x1410` | ✅ 社区实测支持（由社区用户 [@hsb689](https://github.com/hsb689) 提供） |
-| **雷柏 VT3S 系列** | USB 有线直连 | `0x24AE` | `0x4606` / `0x1411` | ✅ 社区实测支持（由社区用户 [@hsb689](https://github.com/hsb689) 提供） |
-| **雷柏 VT3 MAX 系列** | 2.4G 无线接收器 | `0x24AE` | `0x1417` | ✅ 社区实测支持（由社区用户 [@sAchNMN](https://github.com/sAchNMN) 提供） | 
-| **雷柏二代游戏鼠标 (未打标机型)** | 2.4G / USB 有线 | `0x24AE` | 通用自动匹配 | 🔑待验证 |
+状态每 10 秒自动刷新一次；设备插拔由系统设备通知即时触发。
 
-### 💡 通用兼容机制与社区贡献指南
+程序是单文件绿色版（静态链接、无运行库依赖），可以放到任意目录使用，例如 `D:\apps\razer-tray.exe`；
+移动位置后如需开机自启动，请重新开关一次「开机自启动」菜单项，让它记录新的路径。
 
-1. **二代 Nordic 架构全功能即插即用**：
-   雷柏二代游戏鼠标（基于 Nordic 54L15 / 3950 方案）在底层通信报文协议（UsagePage `0xFF00`、Report ID `0x07` 与控制指令集）上完全统一。即使您的鼠标尚未打标，程序也会自动以 **`雷柏游戏鼠标 (通用)`** 模式挂载运行，**电量读取、DPI 切换、回报率设置与休眠控制均不受任何影响**。
-2. **提交 PR 收录您的型号（仅需 1 行代码）**：
-   插入鼠标后在 PowerShell 中执行以下命令获取真实 PID：
-   ```powershell
-   Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like "*24AE*" } | Select-Object FriendlyName, InstanceId
-   ```
-   在 `src/device_manager.cpp` 的 `VERIFIED_MODELS` 映射表中添加对应行（如 `{ L"14xx", L"雷柏 VT9 Pro" }`），提交 PR 即可合并！
+## 电量显示方式
 
----
+| 样式 | 说明 | 注册表值 |
+| --- | --- | --- |
+| 环形电量（默认） | 圆环按电量填充，中心为三头蛇标志 | `BatteryStyle = 0` |
+| 电池图标 | 经典横向电池，按电量填充 | `BatteryStyle = 1` |
+| 数字显示 | 直接显示电量百分比数字 | `BatteryStyle = 2` |
 
-## 🔌 TrafficMonitor 插件使用指南
+设置保存在 `HKCU\Software\razer-tray`，随程序启动读取。
 
-本项目提供官方适配的 TrafficMonitor 扩展插件（`rapoo-plugin.dll`），可在系统监控软件 [TrafficMonitor](https://github.com/zhongyang219/TrafficMonitor) 的任务栏窗口与主悬浮窗中显示鼠标状态。
+## 设备支持
 
-### 显示项目
-- **鼠标电量**（例如：`M: 85%`，充电时显示为 `M: ⚡85%`）
-- **鼠标 DPI**（例如：`DPI: 800`）
-- **悬停信息 (Tooltip)**：鼠标悬停在监控项上可查看型号、连接模式（2.4G/USB）、详细电量与当前档位。
+识别方式为 **USB Vendor ID `1532` + 控制接口探测**：程序遍历 Razer HID 接口，
+选择承载 90/91 字节 Feature 报文的那一个（不同机型可能是 `0xFF00` 厂商接口，
+也可能是 Windows 只允许「仅写」打开的鼠标接口），并通过一次实际查询确认设备是否响应。
 
-### 安装步骤
-1. 前往 [Releases](https://github.com/Iris-0109/rapoo-tray/releases) 下载 `rapoo-plugin.dll`。
-2. 将 `rapoo-plugin.dll` 放置于 TrafficMonitor 根目录下的 `plugins` 文件夹中。
-3. 重启 TrafficMonitor（或在右键菜单中选择“更多功能” -> “插件管理” -> “重新加载插件”）。
-4. 在“选项” -> “任务栏窗口设置”或“主窗口设置”中，勾选“鼠标电量”和“鼠标DPI”即可。
+### Basilisk
 
----
+| 型号 | PID | 连接 | 验证状态 |
+| --- | --- | --- | --- |
+| Razer Basilisk | 0x0064 | 有线 | 待验证 |
+| Razer Basilisk Essential | 0x0065 | 有线 | 待验证 |
+| Razer Basilisk X HyperSpeed | 0x0083 | 无线 | 待验证 |
+| Razer Basilisk V2 | 0x0085 | 有线 | 待验证 |
+| Razer Basilisk Ultimate (Wired) | 0x0086 | 有线 | 待验证 |
+| Razer Basilisk Ultimate (Receiver) | 0x0088 | 无线 | 待验证 |
+| Razer Basilisk V3 | 0x0099 | 有线 | 待验证 |
+| Razer Basilisk V3 Pro (Wired) | 0x00AA | 有线 | 待验证 |
+| Razer Basilisk V3 Pro (Wireless) | 0x00AB | 无线 | 待验证 |
+| Razer Basilisk V3 X HyperSpeed | 0x00B9 | 无线 | ✅ 实机验证 |
+| Razer Basilisk V3 35K | 0x00CB | 有线 | 待验证 |
+| Razer Basilisk V3 Pro 35K (Wired) | 0x00CC | 有线 | 待验证 |
+| Razer Basilisk V3 Pro 35K (Wireless) | 0x00CD | 无线 | 待验证 |
 
-## 📥 下载与安装
+### Viper
 
-请前往 [GitHub Releases](https://github.com/Iris-0109/rapoo-tray/releases) 下载最新发行版：
+| 型号 | PID | 连接 | 验证状态 |
+| --- | --- | --- | --- |
+| Razer Viper | 0x0078 | 有线 | 待验证 |
+| Razer Viper Ultimate (Wired) | 0x007A | 有线 | 待验证 |
+| Razer Viper Ultimate (Wireless) | 0x007B | 无线 | 待验证 |
+| Razer Viper Mini | 0x008A | 有线 | 待验证 |
+| Razer Viper 8KHz | 0x0091 | 有线 | 待验证 |
+| Razer Viper V2 Pro (Wired) | 0x00A5 | 有线 | 待验证 |
+| Razer Viper V2 Pro (Wireless) | 0x00A6 | 无线 | 待验证 |
+| Razer Viper V3 HyperSpeed | 0x00B8 | 无线 | 待验证 |
+| Razer Viper V3 Pro (Wired) | 0x00C0 | 有线 | 待验证 |
+| Razer Viper V3 Pro (Wireless) | 0x00C1 | 无线 | 待验证 |
 
-- **单文件便携版 (`rapoo-tray.exe`)**：约 370 KB，绿色免安装独立托盘程序。
-- **一键安装向导 (`rapoo-tray-setup.exe`)**：约 550 KB，自动部署至本地目录，创建快捷方式并支持控制面板卸载。
-- **TrafficMonitor 插件 (`rapoo-plugin.dll`)**：约 28 KB，供 TrafficMonitor 用户按需下载使用。
+### DeathAdder
 
----
+| 型号 | PID | 连接 | 验证状态 |
+| --- | --- | --- | --- |
+| Razer DeathAdder 3500 | 0x0054 | 有线 | 待验证 |
+| Razer DeathAdder Elite | 0x005C | 有线 | 待验证 |
+| Razer DeathAdder Essential | 0x006E | 有线 | 待验证 |
+| Razer DeathAdder V2 | 0x0084 | 有线 | 待验证 |
+| Razer DeathAdder V2 Mini | 0x008C | 有线 | 待验证 |
+| Razer DeathAdder V2 X HyperSpeed | 0x009C | 无线 | 待验证 |
+| Razer DeathAdder V3 | 0x00B2 | 有线 | 待验证 |
+| Razer DeathAdder V3 Pro (Wired) | 0x00B6 | 有线 | 待验证 |
+| Razer DeathAdder V3 Pro (Wireless) | 0x00B7 | 无线 | 待验证 |
+| Razer DeathAdder V4 Pro (Wired) | 0x00BE | 有线 | 待验证 |
+| Razer DeathAdder V4 Pro (Wireless) | 0x00BF | 无线 | 待验证 |
+| Razer DeathAdder V3 Pro (Wired, ALT) | 0x00C2 | 有线 | 待验证 |
+| Razer DeathAdder V3 Pro (Wireless, ALT) | 0x00C3 | 无线 | 待验证 |
+| Razer DeathAdder V3 HyperSpeed (Wired) | 0x00C4 | 有线 | 待验证 |
+| Razer DeathAdder V3 HyperSpeed (Wireless) | 0x00C5 | 无线 | 待验证 |
 
-## 🔬 技术协议解析 (Protocol Reverse Engineering)
+### 其他型号与能力说明
 
-程序通过 Windows 原生 HID API 与鼠标专有端点建立通信：
+- 不在上表中的雷蛇鼠标：只要系统产品名包含鼠标相关关键字（如 `DeathAdder`、`Viper`、
+  `Basilisk`、`Mouse` 等），程序仍会识别并使用系统提供的产品名显示，遥测可用性取决于固件。
+- **电量**：命令 `0x07/0x80`，原始值 0–255 换算为百分比；接收器或鼠标未响应时不显示。
+- **充电状态**：命令 `0x07/0x84`。使用 AA/AAA 电池的机型（例如 Basilisk V3 X HyperSpeed）
+  固件不上报充电状态，属正常现象。
+- **DPI**：命令 `0x04/0x85`（7 字节参数），优先读取硬件当前值，失败时回退到软件档位值。
+- **轮询率**：命令 `0x00/0x85`；8000 Hz 级设备回退到 `0x00/0xC0`。
+- **验证状态**：上表「验证状态」列标出在真机上实际测试过的机型。当前实测通过的是
+  Razer Basilisk V3 X HyperSpeed（`0x00B9`）：电量、DPI、轮询率均读取正常
+  （测试时为 60% / 1200 DPI / 1000 Hz）。其余机型依照公开协议适配，标记为「待验证」，
+  如果你的机型可用或某项读数缺失，欢迎反馈。
 
-### 1. 被动状态接收端点 (UsagePage: `0xFF00`, Usage: `0x0002`)
-通过中断传输接收 Report ID 为 `0x07` 的 19 字节实时状态包：
-- `Byte [0]`: `0x07` (Report ID)
-- `Byte [1]`: 设备标识（2.4G 接收器固定为 `0x20`）
-- `Byte [2]`: 当前 DPI 档位索引（从 0 开始）
-- `Byte [3..4]`: X 轴 DPI 数值（16 位小端序整数）
-- `Byte [5..6]`: Y 轴 DPI 数值（16 位小端序整数）
-- `Byte [7]`: 活跃状态标志
-- `Byte [8]`: 物理电量百分比（`0x00` ~ `0x64`，即 0% ~ 100%）
+## 已知限制
 
-### 2. 双向控制与心跳检测通道 (UsagePage: `0xFF00`, Usage: `0x000E` / `0x000F`)
-通过 33 字节 Command Report (`0x06`) 与 Feature Report (`0x08`) 实现寄存器读写与离线状态判定：
-- **写入寄存器**：向 Usage `0x000E` 写入 `[0x06, 0xA5, 0xA5, 0x01, Addr, Bank, Value, ...]`。
-- **读取寄存器与心跳**：向 Usage `0x000E` 发送读取命令后，通过 Usage `0x000F` 调用 `HidD_GetFeature` 获取 33 字节应答。若设备休眠或关机，通道立即产生超时应答，程序由此判定设备进入离线状态。
+- 托盘图标尺寸由系统决定：100% 缩放下为 16×16 像素，图形已按该尺寸优化，但不可能再提高物理分辨率。
+- 无线鼠标休眠时所有查询会超时，界面显示 `--`（接收器仍在线），唤醒后 10 秒内自动恢复。
+- 蓝牙连接、未暴露 90/91 字节 Feature 报文的机型，或固件不支持的查询项无法读取。
+- 本工具只读：不能修改 DPI、轮询率、灯光或按键，也不提供驱动级功能。
 
----
+## 构建
 
-## 🛠️ 源码编译 (Build from Source)
+需要 MinGW-w64（`g++` + `windres`）或 MSVC（`cl` + `rc`）任一套工具链：
 
-环境要求：Windows 10 / 11，配备 MinGW-w64 (GCC 9+) 或 MSVC (Visual Studio 2019+)。
-
-### 1. 编译可执行程序
-运行根目录下的一键编译脚本：
-```cmd
+```bat
 build.bat
 ```
-输出产物：`bin\rapoo-tray.exe`
 
-### 2. 编译安装程序
-```cmd
-cd installer
-build_installer.bat
+产物为 `bin\razer-tray.exe`（静态链接、无运行库依赖）。
+
+`bin/` 与 `dist/` 都是构建产物目录，已在 `.gitignore` 中忽略，不会提交到仓库。
+
+可选组件：
+
+```bat
+installer\build_installer.bat   :: 需要先有 bin\razer-tray.exe，产物 dist\razer-tray-setup.exe
+powershell -File tools\make_logo_mask.ps1   :: 由 res\logo.png 重新生成 res\logo_mask.bin
 ```
-输出产物：`dist\rapoo-tray-setup.exe`
 
----
+## 目录结构
 
-## 🤝 鸣谢与致敬 (Credits & Acknowledgments)
+```
+razer-tray/
+├─ src/
+│  ├─ main.cpp            托盘、窗口消息与刷新调度
+│  ├─ device_manager.cpp  Razer HID 枚举、协议查询、连接判定
+│  ├─ tray_icon.cpp       托盘图标绘制（环形 / 电池 / 数字）
+│  ├─ tray_menu.cpp       右键菜单与设置项
+│  └─ osd_window.cpp      OSD 提示窗口
+├─ res/
+│  ├─ app.ico             程序图标（多尺寸）
+│  ├─ logo.png            三头蛇图形源文件
+│  ├─ logo_mask.bin       由 logo.png 生成的字形掩膜
+│  ├─ app.rc / app.manifest
+├─ installer/             可选安装包工程
+├─ tools/make_logo_mask.ps1
+├─ docs/                  截图
+├─ build.bat
+└─ LICENSE
+```
 
-- **[@Nuitfanee](https://github.com/Nuitfanee)** ([ClickSync](https://github.com/Nuitfanee/ClickSync))：提供了雷柏双向控制协议逆向与寄存器地址映射的关键技术启发。
-- **[@hsb689](https://github.com/hsb689)**：提供了雷柏 VT3S 系列硬件 PID 数据。
-- **[@sAchNMN](https://github.com/sAchNMN)**：提供了雷柏 VT3 MAX 系列硬件 PID 数据。
+## 免责声明
 
+- 本项目是个人自用的免费开源工具，与任何硬件厂商均无隶属、赞助、授权或背书关系。
+- 文中出现的产品名称与商标归各自所有者，在此仅用于说明兼容性。
+- 本工具只读取设备状态，不修改设备设置，也不包含任何厂商的官方软件、驱动或固件。
+- 软件按「现状」提供，不承诺在所有设备或固件版本上都可用；使用风险由使用者自行承担。
 
----
+## 灵感来源与致谢
 
-## ⚠️ 免责声明 (Disclaimer)
+- **灵感与代码基础**：[Iris-0109/rapoo-tray](https://github.com/Iris-0109/rapoo-tray)（MIT）。
+  托盘的交互方式、右键菜单、OSD 与安装包工程都源自该项目；本仓库把设备层替换为雷蛇鼠标，
+  重写了遥测协议、连接判定、托盘图标绘制与 OSD 渲染。
+- **协议与设备清单参考**：[OpenRazer](https://github.com/openrazer/openrazer)（GPL-2.0）。
+  本项目仅参考其公开的协议命令与设备 PID 清单，未复制其源代码。
 
-1. 本项目为个人开源业余作品，旨在为雷柏无线鼠标用户提供轻量、低占用的系统级托盘助手，**非雷柏官方出品**。
-2. “雷柏”与“RAPOO”商标及产品名称所有权归深圳市雷柏科技股份有限公司所有。
-3. 软件按“原样”（AS IS）提供，作者不对使用过程中可能出现的任何偶发问题承担法律责任。
+## 许可
 
----
-
-## 📄 开源许可证 (License)
-
-本项目基于 [MIT License](LICENSE) 开源。
+[MIT](LICENSE)。沿用原项目版权声明：Copyright (c) 2026 Iris，Copyright (c) 2026 razer-tray contributors。

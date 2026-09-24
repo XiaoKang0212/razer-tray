@@ -24,36 +24,28 @@ jobs:
           update: false
           install: mingw-w64-x86_64-gcc mingw-w64-x86_64-binutils
 
-      - name: Build rapoo-tray.exe (Standalone)
+      - name: Build razer-tray.exe (Standalone)
         shell: msys2 {0}
         run: |
           mkdir -p bin
           windres --codepage 65001 -I res -i res/app.rc -o bin/app.o
-          g++ -O3 -mwindows -municode -s -static src/main.cpp src/rapoo_protocol.cpp src/device_manager.cpp src/osd_window.cpp src/tray_menu.cpp bin/app.o -lsetupapi -lhid -luser32 -lgdi32 -lshell32 -ladvapi32 -luxtheme -ldwmapi -o bin/rapoo-tray.exe
+          g++ -O3 -mwindows -municode -s -static \
+            src/main.cpp src/device_manager.cpp src/osd_window.cpp \
+            src/tray_menu.cpp src/tray_icon.cpp bin/app.o \
+            -lsetupapi -lhid -luser32 -lgdi32 -lshell32 -ladvapi32 \
+            -luxtheme -ldwmapi -lmsimg32 \
+            -o bin/razer-tray.exe
           rm -f bin/app.o
 
-      - name: Build rapoo-tray-setup.exe (Installer)
-        shell: msys2 {0}
-        run: |
-          mkdir -p dist
-          cd installer
-          windres --codepage 65001 -i installer.rc -o installer.o -O coff
-          g++ -O3 -mwindows -municode -s -static installer.cpp installer.o -lole32 -lshell32 -luser32 -lgdi32 -ladvapi32 -luuid -o ../dist/rapoo-tray-setup.exe
-          rm -f installer.o
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: razer-tray
+          path: bin/razer-tray.exe
 
-      - name: Build rapoo-plugin.dll (TrafficMonitor Plugin)
-        shell: msys2 {0}
-        run: |
-          mkdir -p bin
-          cd plugin
-          windres --codepage 65001 -i plugin.rc -o plugin.o -O coff
-          g++ -shared -O3 -mwindows -municode -s -static rapoo_plugin.cpp plugin.o -lsetupapi -lhid -luser32 -lgdi32 -lshell32 -ladvapi32 -o ../bin/rapoo-plugin.dll
-          rm -f plugin.o
-
-      - name: Create GitHub Release & Upload Assets
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          body_path: RELEASE_NOTES.md
-          files: |
-            bin/rapoo-plugin.dll
+          generate_release_notes: true
+          files: bin/razer-tray.exe

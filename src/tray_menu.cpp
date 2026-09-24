@@ -3,13 +3,15 @@
 #include <dwmapi.h>
 #include <strsafe.h>
 #include <cstring>
+#include <cstdint>
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace Tray {
 
 static const WCHAR* RUN_KEY = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-static const WCHAR* APP_NAME = L"rapoo-tray";
+static const WCHAR* APP_NAME = L"razer-tray";
 
 static HWND g_hParentAppWnd = NULL;
 static HWND g_hAcrylicMenu = NULL;
@@ -123,32 +125,32 @@ static void ApplyModernWindowStyle(HWND hWnd, bool isDark, int w = 0, int h = 0)
     }
 }
 
-static int g_batteryStyle = -1;
+static const WCHAR* SETTINGS_KEY = L"Software\\razer-tray";
+static int g_batteryDisplayStyle = -1;
 
-int GetBatteryStyle() {
-    if (g_batteryStyle == -1) {
+int GetBatteryDisplayStyle() {
+    if (g_batteryDisplayStyle < 0) {
+        g_batteryDisplayStyle = Tray::BATTERY_STYLE_RING;
         HKEY hKey;
         DWORD val = 0, size = sizeof(DWORD), type = 0;
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\rapoo-tray", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, SETTINGS_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
             if (RegQueryValueExW(hKey, L"BatteryStyle", NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
-                g_batteryStyle = (int)val % 3;
+                g_batteryDisplayStyle = (int)(val % 3);
             }
             RegCloseKey(hKey);
         }
-        if (g_batteryStyle == -1) g_batteryStyle = 0;
     }
-    return g_batteryStyle;
+    return g_batteryDisplayStyle;
 }
 
-int CycleBatteryStyle() {
-    g_batteryStyle = (GetBatteryStyle() + 1) % 3;
+void SetBatteryDisplayStyle(int style) {
+    g_batteryDisplayStyle = std::clamp(style, 0, 2);
     HKEY hKey;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\rapoo-tray", 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        DWORD val = (DWORD)g_batteryStyle;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, SETTINGS_KEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        DWORD val = (DWORD)g_batteryDisplayStyle;
         RegSetValueExW(hKey, L"BatteryStyle", 0, REG_DWORD, (const BYTE*)&val, sizeof(DWORD));
         RegCloseKey(hKey);
     }
-    return g_batteryStyle;
 }
 
 bool IsAutoRunEnabled() {
@@ -287,7 +289,7 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                     SetCapture(hWnd);
                     double ratio = (double)(mx - trackX0) / (double)(trackX1 - trackX0);
                     ratio = std::clamp(ratio, 0.0, 1.0);
-                    g_sliderVal = Rapoo::ClampSleepMinutes(2 + (int)(ratio * (120 - 2) + 0.5));
+                    g_sliderVal = std::clamp(2 + (int)(ratio * (120 - 2) + 0.5), 2, 120);
                     InvalidateRect(hWnd, NULL, FALSE);
                     return 0;
                 }
@@ -336,7 +338,7 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                 int trackX1 = rc.right - S(20);
                 double ratio = (double)(mx - trackX0) / (double)(trackX1 - trackX0);
                 ratio = std::clamp(ratio, 0.0, 1.0);
-                int newVal = Rapoo::ClampSleepMinutes(2 + (int)(ratio * (120 - 2) + 0.5));
+                int newVal = std::clamp(2 + (int)(ratio * (120 - 2) + 0.5), 2, 120);
                 if (newVal != g_sliderVal) {
                     g_sliderVal = newVal;
                     InvalidateRect(hWnd, NULL, FALSE);
@@ -344,8 +346,8 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                 return 0;
             }
 
-            if (g_activeSubId == 1) { // Polling Rate list
-                int count = 7;
+            if (g_activeSubId == 1 || g_activeSubId == 3) { // List submenus
+                int count = (g_activeSubId == 1) ? 7 : 3;
                 int itemH = S(28);
                 int y = S(8);
                 int newH = -1;
@@ -385,6 +387,16 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                 return 0;
             }
 
+            if (g_activeSubId == 3 && g_subHover >= 0) {
+                static const WCHAR* labels[] = { L"环形电量", L"电池图标", L"数字显示" };
+                const int chosen = std::clamp(g_subHover, 0, 2);
+                SetBatteryDisplayStyle(chosen);
+                DismissAllMenus();
+                Device::RequestRefresh();
+                Osd::Show(labels[chosen], L"托盘图标已切换为所选显示方式", L"右键菜单可随时再次切换");
+                return 0;
+            }
+
             if (g_activeSubId == 1 && g_subHover >= 0) {
                 const int hzVals[] = { 125, 250, 500, 1000, 2000, 4000, 8000 };
                 int hz = hzVals[g_subHover];
@@ -394,7 +406,7 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
 
                 Device::State st = Device::GetCurrentState();
                 WCHAR l1[64], l2[64], l3[64];
-                StringCchPrintfW(l1, ARRAYSIZE(l1), L"回报率: %d Hz", hz);
+                StringCchPrintfW(l1, ARRAYSIZE(l1), L"轮询率: %d Hz", hz);
                 StringCchPrintfW(l2, ARRAYSIZE(l2), L"设置已即时生效");
                 const WCHAR* modeStr = st.isWired ? L"USB" : L"2.4G";
                 const WCHAR* batIcon = st.isCharging ? L"⚡" : L"🔋";
@@ -420,7 +432,7 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             COLORREF borderCol = g_curDark ? RGB(50, 54, 65) : RGB(218, 222, 230);
             COLORREF hoverCol = g_curDark ? RGB(52, 58, 72) : RGB(228, 232, 242);
             COLORREF textCol = g_curDark ? RGB(235, 240, 248) : RGB(30, 35, 45);
-            COLORREF checkCol = g_curDark ? RGB(96, 205, 255) : RGB(0, 120, 215);
+            COLORREF checkCol = g_curDark ? RGB(68, 214, 44) : RGB(38, 150, 34);
             COLORREF mutedCol = g_curDark ? RGB(140, 150, 165) : RGB(120, 130, 145);
             COLORREF trackBgCol = g_curDark ? RGB(45, 50, 60) : RGB(215, 220, 230);
 
@@ -475,6 +487,37 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                     DrawTextW(memDC, labels[i], -1, &rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
                     if (hzVals[i] == currentHz) {
+                        SetTextColor(memDC, checkCol);
+                        RECT rCheck = { rc.right - S(28), y, rc.right - S(10), y + itemH };
+                        DrawTextW(memDC, L"✓", -1, &rCheck, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    }
+                    y += itemH;
+                }
+            } else if (g_activeSubId == 3) { // Battery indicator style
+                const WCHAR* labels[] = { L"环形电量", L"电池图标", L"数字显示" };
+                const int current = GetBatteryDisplayStyle();
+
+                int itemH = S(28);
+                int y = S(8);
+                for (int i = 0; i < 3; ++i) {
+                    RECT rItem = { S(6), y, rc.right - S(6), y + itemH };
+                    if (i == g_subHover) {
+                        HBRUSH hH = CreateSolidBrush(hoverCol);
+                        HPEN hP = CreatePen(PS_SOLID, 1, hoverCol);
+                        HGDIOBJ oP = SelectObject(memDC, hP);
+                        HGDIOBJ oB = SelectObject(memDC, hH);
+                        RoundRect(memDC, rItem.left, rItem.top + 1, rItem.right, rItem.bottom - 1, S(6), S(6));
+                        SelectObject(memDC, oP);
+                        SelectObject(memDC, oB);
+                        DeleteObject(hP);
+                        DeleteObject(hH);
+                    }
+
+                    SetTextColor(memDC, textCol);
+                    RECT rText = { S(14), y, rc.right - S(32), y + itemH };
+                    DrawTextW(memDC, labels[i], -1, &rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+                    if (i == current) {
                         SetTextColor(memDC, checkCol);
                         RECT rCheck = { rc.right - S(28), y, rc.right - S(10), y + itemH };
                         DrawTextW(memDC, L"✓", -1, &rCheck, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -592,14 +635,14 @@ static void ShowSubMenuWindow(int subType, RECT rItemScreen) {
         wcSub.cbSize = sizeof(wcSub);
         wcSub.lpfnWndProc = AcrylicSubWndProc;
         wcSub.hInstance = hInst;
-        wcSub.lpszClassName = L"RapooModernSubMenuWnd";
+        wcSub.lpszClassName = L"RazerModernSubMenuWnd";
         wcSub.hCursor = LoadCursor(NULL, IDC_ARROW);
         RegisterClassExW(&wcSub);
         s_subRegistered = true;
     }
 
-    int subW = (subType == 1) ? S(140) : S(260); // 260px wide for sleep slider
-    int subH = (subType == 1) ? S(212) : S(138); // 138px height for sleep slider
+    int subW = (subType == 1) ? S(140) : ((subType == 3) ? S(168) : S(260));
+    int subH = (subType == 1) ? S(212) : ((subType == 3) ? S(100) : S(138));
 
     HMONITOR hMon = MonitorFromPoint({ rItemScreen.left, rItemScreen.top }, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi = { sizeof(mi) };
@@ -621,7 +664,7 @@ static void ShowSubMenuWindow(int subType, RECT rItemScreen) {
 
     g_hAcrylicSubMenu = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        L"RapooModernSubMenuWnd",
+        L"RazerModernSubMenuWnd",
         L"",
         WS_POPUP,
         subX, subY, subW, subH,
@@ -763,7 +806,7 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
             COLORREF mutedCol = g_curDark ? RGB(155, 165, 180) : RGB(100, 110, 125);
             COLORREF greenCol = g_curDark ? RGB(34, 197, 94) : RGB(22, 163, 74);
             COLORREF sepCol = g_curDark ? RGB(40, 44, 54) : RGB(225, 228, 236);
-            COLORREF checkCol = g_curDark ? RGB(96, 205, 255) : RGB(0, 120, 215);
+            COLORREF checkCol = g_curDark ? RGB(68, 214, 44) : RGB(38, 150, 34);
 
             HBRUSH bgBrush = CreateSolidBrush(bgCol);
             FillRect(memDC, &rc, bgBrush);
@@ -796,7 +839,9 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
                     SelectObject(memDC, hFontBold);
                     SetTextColor(memDC, textCol);
                     RECT rTitle = { S(16), y + S(4), rc.right - S(16), y + S(26) };
-                    DrawTextW(memDC, g_mainItems[i].label, -1, &rTitle, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    // Ellipsis only kicks in if the name is wider than the screen allows.
+                    DrawTextW(memDC, g_mainItems[i].label, -1, &rTitle,
+                              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
                     SelectObject(memDC, hFontSub);
                     Device::State st = Device::GetCurrentState();
@@ -890,18 +935,20 @@ void ShowMenu(HWND hWndOwner) {
 
     MenuItemData itemHeader = { 0 };
     itemHeader.isHeader = true;
-    itemHeader.label = st.modelName[0] ? st.modelName : L"雷柏游戏鼠标";
+    itemHeader.label = st.modelName[0] ? st.modelName : L"Razer gaming mouse";
     if (st.isConnected) {
-        StringCchCopyW(itemHeader.value, 32, st.isWired ? L"● USB 有线连接 · 已连接" : L"● 2.4G 无线连接 · 已连接");
+        StringCchCopyW(itemHeader.value, 32, st.isWired ? L"● 已连接 · USB 有线" : L"● 已连接 · 2.4 GHz 无线");
+    } else if (st.receiverPresent) {
+        StringCchCopyW(itemHeader.value, 32, L"● 接收器已就绪 · 鼠标未连接");
     } else {
-        StringCchCopyW(itemHeader.value, 32, L"● 设备休眠 / 未连接");
+        StringCchCopyW(itemHeader.value, 32, L"● 未连接 · 检查鼠标或接收器");
     }
     g_mainItems.push_back(itemHeader);
 
     MenuItemData itemBat = { 0 };
     itemBat.label = L"电池电量";
-    itemBat.isDisabled = !st.isConnected;
-    if (st.isConnected) {
+    itemBat.isDisabled = !st.isConnected || !st.hasBattery;
+    if (st.isConnected && st.hasBattery) {
         if (st.isCharging) {
             StringCchPrintfW(itemBat.value, 32, L"%d%% 充电中", st.battery);
         } else {
@@ -913,38 +960,32 @@ void ShowMenu(HWND hWndOwner) {
     g_mainItems.push_back(itemBat);
 
     MenuItemData itemDpi = { 0 };
-    itemDpi.label = L"DPI 档位";
-    itemDpi.isDisabled = !st.isConnected;
-    if (st.isConnected) {
-        StringCchPrintfW(itemDpi.value, 32, L"%d (第 %d 档)", st.dpiX, st.dpiLevel);
+    itemDpi.label = L"灵敏度 · DPI";
+    itemDpi.isDisabled = !st.isConnected || !st.hasDpi;
+    if (st.isConnected && st.hasDpi) {
+        StringCchPrintfW(itemDpi.value, 32, L"%d DPI", st.dpiX);
     } else {
         StringCchCopyW(itemDpi.value, 32, L"--");
     }
     g_mainItems.push_back(itemDpi);
 
     MenuItemData itemPoll = { 0 };
-    itemPoll.label = L"回报率设置";
-    itemPoll.isInteractive = true;
-    itemPoll.isDisabled = !st.isConnected;
-    itemPoll.submenuType = 1;
-    if (st.isConnected) {
-        StringCchPrintfW(itemPoll.value, 32, L"%d Hz  ›", st.pollingHz);
+    itemPoll.label = L"轮询率";
+    itemPoll.isDisabled = !st.isConnected || !st.hasPollingRate;
+    if (st.isConnected && st.hasPollingRate) {
+        StringCchPrintfW(itemPoll.value, 32, L"%d Hz", st.pollingHz);
     } else {
         StringCchCopyW(itemPoll.value, 32, L"--");
     }
     g_mainItems.push_back(itemPoll);
 
-    MenuItemData itemSleep = { 0 };
-    itemSleep.label = L"休眠时间设置";
-    itemSleep.isInteractive = true;
-    itemSleep.isDisabled = !st.isConnected;
-    itemSleep.submenuType = 2; // Slider submenu
-    if (st.isConnected) {
-        StringCchPrintfW(itemSleep.value, 32, L"%d 分钟  ›", st.sleepMinutes);
-    } else {
-        StringCchCopyW(itemSleep.value, 32, L"--");
-    }
-    g_mainItems.push_back(itemSleep);
+    static const WCHAR* styleNames[] = { L"环形电量", L"电池图标", L"数字显示" };
+    MenuItemData itemBatteryStyle = { 0 };
+    itemBatteryStyle.label = L"电量显示";
+    itemBatteryStyle.isInteractive = true;
+    itemBatteryStyle.submenuType = 3;
+    StringCchPrintfW(itemBatteryStyle.value, 32, L"%s ›", styleNames[GetBatteryDisplayStyle()]);
+    g_mainItems.push_back(itemBatteryStyle);
 
     MenuItemData sep1 = { 0 };
     sep1.isSeparator = true;
@@ -969,7 +1010,33 @@ void ShowMenu(HWND hWndOwner) {
     for (size_t i = 0; i < g_mainItems.size(); i++) {
         totalH += GetItemH((int)i);
     }
+    // Menu width follows the device name so the header title is never clipped.
     int menuW = S(236);
+    if (!g_mainItems.empty() && g_mainItems[0].isHeader) {
+        HDC measureDc = GetDC(NULL);
+        HFONT titleFont = CreateFontW(-S(14), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+        HFONT subFont = CreateFontW(-S(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+
+        RECT rTitle = {0, 0, 0, 0};
+        RECT rSub = {0, 0, 0, 0};
+        HGDIOBJ oldMeasureFont = SelectObject(measureDc, titleFont);
+        DrawTextW(measureDc, g_mainItems[0].label, -1, &rTitle, DT_CALCRECT | DT_SINGLELINE);
+        SelectObject(measureDc, subFont);
+        DrawTextW(measureDc, g_mainItems[0].value, -1, &rSub, DT_CALCRECT | DT_SINGLELINE);
+        SelectObject(measureDc, oldMeasureFont);
+        DeleteObject(titleFont);
+        DeleteObject(subFont);
+        ReleaseDC(NULL, measureDc);
+
+        const int requiredW = std::max(rTitle.right - rTitle.left, rSub.right - rSub.left) + S(34);
+        const int workWidth = mi.rcWork.right - mi.rcWork.left;
+        const int limitW = std::max(S(236), std::min(workWidth - S(24), S(460)));
+        menuW = std::clamp(requiredW, S(236), limitW);
+    }
 
     int posX = pt.x - S(10);
     int posY = pt.y - totalH - S(10);
@@ -985,7 +1052,7 @@ void ShowMenu(HWND hWndOwner) {
         wc.cbSize = sizeof(wc);
         wc.lpfnWndProc = AcrylicMainWndProc;
         wc.hInstance = hInst;
-        wc.lpszClassName = L"RapooModernMainMenuWnd";
+        wc.lpszClassName = L"RazerModernMainMenuWnd";
         wc.hCursor = LoadCursor(NULL, IDC_ARROW);
         RegisterClassExW(&wc);
         s_mainRegistered = true;
@@ -996,7 +1063,7 @@ void ShowMenu(HWND hWndOwner) {
 
     g_hAcrylicMenu = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-        L"RapooModernMainMenuWnd",
+        L"RazerModernMainMenuWnd",
         L"",
         WS_POPUP,
         posX, posY, menuW, totalH,
@@ -1025,436 +1092,26 @@ void ShowMenu(HWND hWndOwner) {
     }
 }
 
-// --------------------------------------------------------------------------
-// Taskbar Battery Icon & Tooltip
-// --------------------------------------------------------------------------
-
-static const uint16_t FONT_5X9[10][9] = {
-    { 0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x11, 0x11, 0x0E },
-    { 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E },
-    { 0x0E, 0x11, 0x01, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F },
-    { 0x1E, 0x01, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x01, 0x1E },
-    { 0x02, 0x06, 0x0A, 0x12, 0x12, 0x1F, 0x02, 0x02, 0x02 },
-    { 0x1F, 0x10, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E },
-    { 0x06, 0x08, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x0E },
-    { 0x1F, 0x01, 0x02, 0x02, 0x04, 0x04, 0x08, 0x08, 0x08 },
-    { 0x0E, 0x11, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x11, 0x0E },
-    { 0x0E, 0x11, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x02, 0x0C },
-};
-
-static const uint16_t FONT_4X9_0[9] = {
-    0x06, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x06
-};
-
-static const uint16_t FONT_3X5[10][5] = {
-    { 0x07, 0x05, 0x05, 0x05, 0x07 },
-    { 0x02, 0x06, 0x02, 0x02, 0x07 },
-    { 0x07, 0x01, 0x07, 0x04, 0x07 },
-    { 0x07, 0x01, 0x07, 0x01, 0x07 },
-    { 0x05, 0x05, 0x07, 0x01, 0x01 },
-    { 0x07, 0x04, 0x07, 0x01, 0x07 },
-    { 0x07, 0x04, 0x07, 0x05, 0x07 },
-    { 0x07, 0x01, 0x02, 0x02, 0x02 },
-    { 0x07, 0x05, 0x07, 0x05, 0x07 },
-    { 0x07, 0x05, 0x07, 0x01, 0x07 },
-};
-
-HICON CreateBatteryIcon(int battery, bool isCharging, bool isConnected, int size, bool isDark) {
-    if (size <= 0) size = 16;
-    const int SS = 4;
-    int W = size * SS;
-    int H = size * SS;
-
-    HDC hdcScreen = GetDC(NULL);
-    HDC hdcMem = CreateCompatibleDC(hdcScreen);
-
-    BITMAPINFO bmi = {0};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = W;
-    bmi.bmiHeader.biHeight = -H;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    void* pvPixels = NULL;
-    HBITMAP hbmColor = CreateDIBSection(hdcMem, &bmi, DIB_RGB_COLORS, &pvPixels, NULL, 0);
-    if (!hbmColor || !pvPixels) {
-        DeleteDC(hdcMem);
-        ReleaseDC(NULL, hdcScreen);
-        return NULL;
-    }
-
-    uint32_t* hi = (uint32_t*)pvPixels;
-    std::memset(hi, 0, W * H * 4);
-
-    auto HiPixel = [&](int x, int y, uint32_t c) {
-        if (x >= 0 && x < W && y >= 0 && y < H) {
-            hi[y * W + x] = c;
-        }
-    };
-
-    auto FillRoundRect = [&](int x0, int y0, int x1, int y1, uint32_t col, int rad) {
-        if (rad > (x1 - x0) / 2) rad = (x1 - x0) / 2;
-        if (rad > (y1 - y0) / 2) rad = (y1 - y0) / 2;
-        if (rad < 0) rad = 0;
-        for (int y = y0; y <= y1; ++y) {
-            for (int x = x0; x <= x1; ++x) {
-                int dx = (x < x0 + rad) ? (x0 + rad - x) : (x > x1 - rad) ? (x - (x1 - rad)) : 0;
-                int dy = (y < y0 + rad) ? (y0 + rad - y) : (y > y1 - rad) ? (y - (y1 - rad)) : 0;
-                if (dx * dx + dy * dy <= rad * rad) HiPixel(x, y, col);
-            }
-        }
-    };
-
-    auto DrawDigitScaled = [&](const uint16_t* rows, int fw, int fh,
-                               int x0, int y0, int scale, int bold_w, uint32_t c_digit) {
-        for (int r = 0; r < fh; ++r) {
-            for (int c = 0; c < fw; ++c) {
-                if (!((rows[r] >> (fw - 1 - c)) & 1)) continue;
-                for (int dy = 0; dy < scale; ++dy) {
-                    for (int dx = 0; dx < scale + bold_w; ++dx) {
-                        int px = x0 + c * scale + dx;
-                        int py = y0 + r * scale + dy;
-                        HiPixel(px, py, c_digit);
-                    }
-                }
-            }
-        }
-    };
-
-    int style = GetBatteryStyle();
-
-    // Style 0: 经典电池图标 (左右拉长横向电池 + 极耳 + 三色变色)
-    if (style == 0) {
-        uint32_t c_frame = isDark ? 0xFFFFFFFF : 0xFF1E1E1E;
-        uint32_t c_fill = isCharging ? 0xFF22C55E : ((battery <= 30) ? 0xFFEF4444 : 0xFF3B82F6);
-        uint32_t c_digit = 0xFF000000;
-
-        // Horizontally elongated: enlarged battery icon and digits (做大两号)
-        int tip_w = (size < 20) ? 1 : 2;
-        int tip_h = (size < 20) ? 6 : (size * 4 / 10);
-        int tip_y = (size - tip_h) / 2;
-
-        int pad_y = (size < 20) ? 1 : ((size <= 24) ? 2 : (size * 10 / 100));
-
-        int body_x0 = 0;
-        int body_x1 = (size - 1 - tip_w) * SS + (SS - 1);
-        int body_y0 = pad_y * SS;
-        int body_y1 = (size - 1 - pad_y) * SS + (SS - 1);
-
-        int frame_t = 1 * SS; // 1.0 screen pixel border
-        int radius  = (size < 20) ? (SS + SS / 2) : (2 * SS);
-
-        FillRoundRect(body_x0, body_y0, body_x1, body_y1, c_frame, radius);
-
-        if (isConnected) {
-            FillRoundRect(body_x0 + frame_t, body_y0 + frame_t,
-                          body_x1 - frame_t, body_y1 - frame_t, c_fill, (radius > frame_t ? radius - frame_t : 0));
-        } else {
-            uint32_t c_dim = isDark ? 0x30606060 : 0x30B0B0B0;
-            FillRoundRect(body_x0 + frame_t, body_y0 + frame_t,
-                          body_x1 - frame_t, body_y1 - frame_t, c_dim, (radius > frame_t ? radius - frame_t : 0));
-        }
-
-        int tip_x0 = (size - tip_w) * SS;
-        int tip_x1 = size * SS - 1;
-        int tip_y0 = tip_y * SS;
-        int tip_y1 = (tip_y + tip_h) * SS - 1;
-        FillRoundRect(tip_x0, tip_y0, tip_x1, tip_y1, c_frame, SS / 2);
-
-        int in_x0 = body_x0 + frame_t;
-        int in_x1 = body_x1 - frame_t;
-        int in_y0 = body_y0 + frame_t;
-        int in_w  = in_x1 - in_x0 + 1;
-        int in_h  = (body_y1 - frame_t) - in_y0 + 1;
-
-        if (!isConnected) {
-            uint32_t c_dash = isDark ? 0xFFBBBBBB : 0xFF666666;
-            int dash_w = (size < 20) ? 4 * SS : 5 * SS;
-            int dash_h = 2 * SS;
-            int gap = 2 * SS;
-            int total_w = 2 * dash_w + gap;
-            int sx = in_x0 + (in_w - total_w) / 2;
-            int sy = in_y0 + (in_h - dash_h) / 2;
-            for (int y = 0; y < dash_h; ++y) {
-                for (int x = 0; x < dash_w; ++x) {
-                    HiPixel(sx + x, sy + y, c_dash);
-                    HiPixel(sx + dash_w + gap + x, sy + y, c_dash);
-                }
-            }
-        } else {
-            char s[8];
-            snprintf(s, sizeof(s), "%d", battery);
-            int len = (int)strlen(s);
-
-            bool useLargeFont = (in_h >= 9 * SS && in_w >= 12 * SS);
-            const int fw = useLargeFont ? 5 : 3;
-            const int fh = useLargeFont ? 9 : 5;
-            int gap_fp = (len == 1) ? 0 : 1;
-
-            int target_h = in_h * 85 / 100;
-            int scale = target_h / fh;
-            if (scale < 1) scale = 1;
-            int bold_w = (scale >= 2 * SS) ? 1 : 0;
-
-            auto CalcTextWidth = [&](int sc, int bw) -> int {
-                if (battery == 100 && useLargeFont) {
-                    return (2 * sc + bw) + (gap_fp * sc) + 2 * (4 * sc + bw) + (gap_fp * sc);
-                } else if (battery == 100) {
-                    return (sc + bw) + (gap_fp * sc) + 2 * (3 * sc + bw) + (gap_fp * sc);
-                } else {
-                    return len * (fw * sc + bw) + (len - 1) * (gap_fp * sc);
-                }
-            };
-
-            while (scale > 1 && CalcTextWidth(scale, bold_w) > in_w) {
-                --scale;
-            }
-
-            int text_h = fh * scale;
-            int text_w = CalcTextWidth(scale, bold_w);
-            int sx = in_x0 + (in_w - text_w) / 2;
-            int sy = in_y0 + (in_h - text_h) / 2;
-
-            if (battery == 100 && useLargeFont) {
-                int cur = sx;
-                for (int t = 0; t < 2 * scale + bold_w; ++t)
-                    for (int r = 0; r < text_h; ++r)
-                        HiPixel(cur + t, sy + r, c_digit);
-                cur += 2 * scale + bold_w + gap_fp * scale;
-                uint16_t rows9[9];
-                for (int r = 0; r < 9; ++r) rows9[r] = FONT_4X9_0[r];
-                DrawDigitScaled(rows9, 4, 9, cur, sy, scale, bold_w, c_digit);
-                cur += 4 * scale + bold_w + gap_fp * scale;
-                DrawDigitScaled(rows9, 4, 9, cur, sy, scale, bold_w, c_digit);
-            } else if (battery == 100) {
-                int cur = sx;
-                for (int t = 0; t < scale + bold_w; ++t)
-                    for (int r = 0; r < text_h; ++r)
-                        HiPixel(cur + t, sy + r, c_digit);
-                cur += scale + bold_w + gap_fp * scale;
-                uint16_t rows5[5];
-                for (int r = 0; r < 5; ++r) rows5[r] = FONT_3X5[0][r];
-                DrawDigitScaled(rows5, 3, 5, cur, sy, scale, bold_w, c_digit);
-                cur += 3 * scale + bold_w + gap_fp * scale;
-                DrawDigitScaled(rows5, 3, 5, cur, sy, scale, bold_w, c_digit);
-            } else {
-                int cur = sx;
-                for (int i = 0; i < len; ++i) {
-                    int d = s[i] - '0';
-                    if (useLargeFont) {
-                        DrawDigitScaled(FONT_5X9[d], 5, 9, cur, sy, scale, bold_w, c_digit);
-                    } else {
-                        uint16_t rows5[5];
-                        for (int r = 0; r < 5; ++r) rows5[r] = FONT_3X5[d][r];
-                        DrawDigitScaled(rows5, 3, 5, cur, sy, scale, bold_w, c_digit);
-                    }
-                    cur += fw * scale + bold_w + gap_fp * scale;
-                }
-            }
-        }
-    }
-    // Style 1: 配置二 (状态大圆点，不带数字)
-    else if (style == 1) {
-        uint32_t c_dot;
-        if (!isConnected) {
-            c_dot = isDark ? 0xFF6B7280 : 0xFF9CA3AF;
-        } else if (isCharging) {
-            c_dot = 0xFF22C55E; // Emerald Green
-        } else if (battery <= 30) {
-            c_dot = 0xFFEF4444; // Warning Red
-        } else {
-            c_dot = 0xFF3B82F6; // Tech Blue
-        }
-
-        int cx = W / 2;
-        int cy = H / 2;
-        // Big dot radius: ~34% of icon size, occupying around 68% diameter
-        int dot_r = (size * 34 / 100) * SS;
-        int r2 = dot_r * dot_r;
-
-        for (int y = cy - dot_r - 1; y <= cy + dot_r + 1; ++y) {
-            for (int x = cx - dot_r - 1; x <= cx + dot_r + 1; ++x) {
-                int dx = x - cx;
-                int dy = y - cy;
-                if (dx * dx + dy * dy <= r2) {
-                    HiPixel(x, y, c_dot);
-                }
-            }
-        }
-    }
-    // Style 2: 配置三 (大号纯数字，输入法中英风格，矢量抗锯齿)
-    else {
-        COLORREF targetCol;
-        if (!isConnected) {
-            targetCol = isDark ? RGB(160, 160, 160) : RGB(100, 100, 100);
-        } else if (isCharging) {
-            targetCol = RGB(34, 197, 94); // Green
-        } else if (battery <= 30) {
-            targetCol = RGB(239, 68, 68); // Red
-        } else {
-            targetCol = isDark ? RGB(255, 255, 255) : RGB(20, 20, 20); // White on dark, black on light
-        }
-
-        WCHAR sWide[16] = {0};
-        if (!isConnected) {
-            StringCchCopyW(sWide, ARRAYSIZE(sWide), L"-");
-        } else {
-            StringCchPrintfW(sWide, ARRAYSIZE(sWide), L"%d", battery);
-        }
-
-        int fontH = (battery == 100) ? (-H * 55 / 100) : (-H * 74 / 100);
-        HFONT hFont = CreateFontW(
-            fontH, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            ANTIALIASED_QUALITY, VARIABLE_PITCH, L"Segoe UI"
-        );
-
-        HGDIOBJ oldBm = SelectObject(hdcMem, hbmColor);
-        HFONT oldFont = (HFONT)SelectObject(hdcMem, hFont);
-        SetBkMode(hdcMem, TRANSPARENT);
-        SetTextColor(hdcMem, RGB(255, 255, 255));
-
-        RECT rcText = { 0, -SS, W, H - SS }; // optical baseline adjustment
-        DrawTextW(hdcMem, sWide, -1, &rcText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-        GdiFlush();
-        SelectObject(hdcMem, oldFont);
-        DeleteObject(hFont);
-        SelectObject(hdcMem, oldBm);
-
-        uint8_t tR = GetRValue(targetCol);
-        uint8_t tG = GetGValue(targetCol);
-        uint8_t tB = GetBValue(targetCol);
-
-        for (int y = 0; y < H; ++y) {
-            for (int x = 0; x < W; ++x) {
-                uint32_t raw = hi[y * W + x];
-                uint8_t gray = (raw & 0xFF); // R byte of white text
-                if (gray > 0) {
-                    hi[y * W + x] = ((uint32_t)gray << 24) | ((uint32_t)tR << 16) | ((uint32_t)tG << 8) | tB;
-                } else {
-                    hi[y * W + x] = 0;
-                }
-            }
-        }
-    }
-
-    // Downsample SSxSS to size x size with smooth box filtering
-    BITMAPINFO bomi = {0};
-    bomi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bomi.bmiHeader.biWidth = size;
-    bomi.bmiHeader.biHeight = -size;
-    bomi.bmiHeader.biPlanes = 1;
-    bomi.bmiHeader.biBitCount = 32;
-    bomi.bmiHeader.biCompression = BI_RGB;
-
-    void* pvOut = NULL;
-    HBITMAP hbmOut = CreateDIBSection(hdcMem, &bomi, DIB_RGB_COLORS, &pvOut, NULL, 0);
-    if (!hbmOut || !pvOut) {
-        DeleteObject(hbmColor);
-        DeleteDC(hdcMem);
-        ReleaseDC(NULL, hdcScreen);
-        return NULL;
-    }
-
-    uint32_t* out = (uint32_t*)pvOut;
-    const int SS2 = SS * SS;
-    for (int y = 0; y < size; ++y) {
-        for (int x = 0; x < size; ++x) {
-            uint32_t sumA = 0, sumR = 0, sumG = 0, sumB = 0;
-            for (int sy = 0; sy < SS; ++sy) {
-                const uint32_t* row = hi + (y * SS + sy) * W + x * SS;
-                for (int sx = 0; sx < SS; ++sx) {
-                    uint32_t c = row[sx];
-                    uint32_t a = (c >> 24) & 0xFF;
-                    if (a > 0) {
-                        sumA += a;
-                        sumR += (c >> 16) & 0xFF;
-                        sumG += (c >>  8) & 0xFF;
-                        sumB += (c      ) & 0xFF;
-                    }
-                }
-            }
-            uint8_t avgA = (uint8_t)(sumA / SS2);
-            if (avgA == 0) {
-                out[y * size + x] = 0;
-            } else {
-                uint8_t avgR = (uint8_t)(sumR / SS2);
-                uint8_t avgG = (uint8_t)(sumG / SS2);
-                uint8_t avgB = (uint8_t)(sumB / SS2);
-                uint8_t prR = (uint8_t)((avgR * avgA) / 255);
-                uint8_t prG = (uint8_t)((avgG * avgA) / 255);
-                uint8_t prB = (uint8_t)((avgB * avgA) / 255);
-                out[y * size + x] = ((uint32_t)avgA << 24) | ((uint32_t)prR << 16) | ((uint32_t)prG << 8) | (uint32_t)prB;
-            }
-        }
-    }
-
-    int maskPitch = ((size + 15) / 16) * 2;
-    BYTE maskBits[256] = {0};
-    for (int y = 0; y < size; ++y) {
-        for (int x = 0; x < size; ++x) {
-            uint32_t px = out[y * size + x];
-            uint8_t a = (px >> 24) & 0xFF;
-            if (a < 32) {
-                maskBits[y * maskPitch + (x / 8)] |= (1 << (7 - (x % 8)));
-            }
-        }
-    }
-    HBITMAP hbmMask = CreateBitmap(size, size, 1, 1, maskBits);
-
-    ICONINFO ii = {0};
-    ii.fIcon = TRUE;
-    ii.hbmColor = hbmOut;
-    ii.hbmMask = hbmMask;
-    HICON hIcon = CreateIconIndirect(&ii);
-
-    DeleteObject(hbmColor);
-    DeleteObject(hbmOut);
-    DeleteObject(hbmMask);
-    DeleteDC(hdcMem);
-    ReleaseDC(NULL, hdcScreen);
-
-    return hIcon;
-}
-
 void UpdateTooltip(NOTIFYICONDATAW& nid, const Device::State& state) {
-    if (state.isConnected) {
-        const WCHAR* modeStr = state.isWired ? L" (USB)" : L" (2.4G)";
-        if (state.isCharging) {
-            StringCchPrintfW(
-                nid.szTip,
-                ARRAYSIZE(nid.szTip),
-                L"%s%s\n电量: %d%% (充电中)\nDPI: %d (第 %d 档)\n回报率: %d Hz",
-                state.modelName,
-                modeStr,
-                state.battery,
-                state.dpiX,
-                state.dpiLevel,
-                state.pollingHz
-            );
+    const WCHAR* model = state.modelName[0] ? state.modelName : L"Razer 鼠标";
+    if (!state.isConnected) {
+        if (state.receiverPresent) {
+            StringCchPrintfW(nid.szTip, ARRAYSIZE(nid.szTip),
+                             L"%s\n接收器已就绪 · 鼠标未连接\n打开鼠标电源或移动鼠标唤醒", model);
         } else {
-            StringCchPrintfW(
-                nid.szTip,
-                ARRAYSIZE(nid.szTip),
-                L"%s%s\n电量: %d%%\nDPI: %d (第 %d 档)\n回报率: %d Hz",
-                state.modelName,
-                modeStr,
-                state.battery,
-                state.dpiX,
-                state.dpiLevel,
-                state.pollingHz
-            );
+            StringCchPrintfW(nid.szTip, ARRAYSIZE(nid.szTip), L"%s\n未连接 · 检查鼠标或接收器", model);
         }
-    } else {
-        StringCchPrintfW(
-            nid.szTip,
-            ARRAYSIZE(nid.szTip),
-            L"%s\n设备休眠 / 未连接",
-            state.modelName[0] ? state.modelName : L"雷柏游戏鼠标"
-        );
+        return;
     }
+    const WCHAR* mode = state.isWired ? L"USB 有线" : L"2.4 GHz 无线";
+    WCHAR battery[32], dpi[32], polling[32];
+    if (!state.hasBattery) StringCchCopyW(battery, ARRAYSIZE(battery), L"电量 --");
+    else StringCchPrintfW(battery, ARRAYSIZE(battery), L"电量 %d%%%s", state.battery, state.isCharging ? L" 充电中" : L"");
+    if (!state.hasDpi) StringCchCopyW(dpi, ARRAYSIZE(dpi), L"DPI --");
+    else StringCchPrintfW(dpi, ARRAYSIZE(dpi), L"DPI %d", state.dpiX);
+    if (!state.hasPollingRate) StringCchCopyW(polling, ARRAYSIZE(polling), L"轮询率 --");
+    else StringCchPrintfW(polling, ARRAYSIZE(polling), L"轮询率 %d Hz", state.pollingHz);
+    StringCchPrintfW(nid.szTip, ARRAYSIZE(nid.szTip), L"%s\n已连接 · %s\n%s · %s · %s", model, mode, battery, dpi, polling);
 }
 
 } // namespace Tray

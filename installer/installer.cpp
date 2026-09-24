@@ -34,8 +34,8 @@ static HFONT g_hFontTitle = NULL;
 static HFONT g_hFontBody = NULL;
 
 static const WCHAR* REG_RUN = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-static const WCHAR* REG_UNINSTALL = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\rapoo-tray";
-static const WCHAR* APP_NAME = L"rapoo-tray";
+static const WCHAR* REG_UNINSTALL = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\razer-tray";
+static const WCHAR* APP_NAME = L"razer-tray";
 
 // Kill running process by executable name
 static void TerminateAppProcess() {
@@ -46,7 +46,7 @@ static void TerminateAppProcess() {
     pe.dwSize = sizeof(pe);
     if (Process32FirstW(hSnap, &pe)) {
         do {
-            if (_wcsicmp(pe.szExeFile, L"rapoo-tray.exe") == 0 || _wcsicmp(pe.szExeFile, L"RapooVT7Tray.exe") == 0) {
+            if (_wcsicmp(pe.szExeFile, L"razer-tray.exe") == 0 || _wcsicmp(pe.szExeFile, L"RazerTrayLegacy.exe") == 0) {
                 HANDLE hProc = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
                 if (hProc) {
                     TerminateProcess(hProc, 0);
@@ -103,13 +103,13 @@ static bool ExtractPayloadToFile(LPCWSTR destPath) {
     return (ok && written == size);
 }
 
-// Get installation target directory: %LOCALAPPDATA%\Programs\rapoo-tray
+// Get installation target directory: %LOCALAPPDATA%\Programs\razer-tray
 static bool GetInstallDir(WCHAR* outDir, DWORD maxLen) {
     WCHAR localApp[MAX_PATH];
     if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localApp))) {
         return false;
     }
-    StringCchPrintfW(outDir, maxLen, L"%s\\Programs\\rapoo-tray", localApp);
+    StringCchPrintfW(outDir, maxLen, L"%s\\Programs\\razer-tray", localApp);
     return true;
 }
 
@@ -132,12 +132,12 @@ static void DoInstall() {
     CreateDirectoryW(installDir, NULL);
 
     WCHAR appExePath[MAX_PATH];
-    StringCchPrintfW(appExePath, MAX_PATH, L"%s\\rapoo-tray.exe", installDir);
+    StringCchPrintfW(appExePath, MAX_PATH, L"%s\\razer-tray.exe", installDir);
 
     WCHAR uninstallerPath[MAX_PATH];
     StringCchPrintfW(uninstallerPath, MAX_PATH, L"%s\\Uninstall.exe", installDir);
 
-    // 3. Extract rapoo-tray.exe
+    // 3. Extract razer-tray.exe
     if (!ExtractPayloadToFile(appExePath)) {
         MessageBoxW(g_hMainWnd, L"写入文件失败，请确认程序是否正在运行。", L"错误", MB_ICONERROR);
         EnableWindow(g_hBtnInstall, TRUE);
@@ -154,8 +154,8 @@ static void DoInstall() {
     WCHAR startMenuPrograms[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAMS, NULL, 0, startMenuPrograms))) {
         WCHAR startLnk[MAX_PATH];
-        StringCchPrintfW(startLnk, MAX_PATH, L"%s\\rapoo-tray.lnk", startMenuPrograms);
-        CreateShellShortcut(appExePath, startLnk, L"rapoo-tray", appExePath);
+        StringCchPrintfW(startLnk, MAX_PATH, L"%s\\razer-tray.lnk", startMenuPrograms);
+        CreateShellShortcut(appExePath, startLnk, L"razer-tray", appExePath);
     }
 
     // 6. Create Desktop shortcut
@@ -163,8 +163,8 @@ static void DoInstall() {
         WCHAR desktopDir[MAX_PATH];
         if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_DESKTOPDIRECTORY, NULL, 0, desktopDir))) {
             WCHAR deskLnk[MAX_PATH];
-            StringCchPrintfW(deskLnk, MAX_PATH, L"%s\\rapoo-tray.lnk", desktopDir);
-            CreateShellShortcut(appExePath, deskLnk, L"rapoo-tray", appExePath);
+            StringCchPrintfW(deskLnk, MAX_PATH, L"%s\\razer-tray.lnk", desktopDir);
+            CreateShellShortcut(appExePath, deskLnk, L"razer-tray", appExePath);
         }
     }
 
@@ -182,7 +182,7 @@ static void DoInstall() {
     // 8. Register in Windows Add/Remove Programs
     HKEY hKeyUn;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_UNINSTALL, 0, NULL, 0, KEY_SET_VALUE, NULL, &hKeyUn, NULL) == ERROR_SUCCESS) {
-        const WCHAR* name = L"rapoo-tray";
+        const WCHAR* name = L"razer-tray";
         const WCHAR* ver = L"1.2.0";
         const WCHAR* pub = L"Iris";
         WCHAR unCmd[MAX_PATH + 32];
@@ -210,7 +210,7 @@ static void DoInstall() {
 static void DoUninstall() {
     int res = MessageBoxW(
         NULL,
-        L"确定要卸载 rapoo-tray 吗？",
+        L"确定要卸载 razer-tray 吗？",
         L"卸载确认",
         MB_ICONQUESTION | MB_YESNO | MB_DEFBUTTON2
     );
@@ -223,14 +223,14 @@ static void DoUninstall() {
     WCHAR startMenuPrograms[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PROGRAMS, NULL, 0, startMenuPrograms))) {
         WCHAR startLnk[MAX_PATH];
-        StringCchPrintfW(startLnk, MAX_PATH, L"%s\\rapoo-tray.lnk", startMenuPrograms);
+        StringCchPrintfW(startLnk, MAX_PATH, L"%s\\razer-tray.lnk", startMenuPrograms);
         DeleteFileW(startLnk);
     }
 
     WCHAR desktopDir[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_DESKTOPDIRECTORY, NULL, 0, desktopDir))) {
         WCHAR deskLnk[MAX_PATH];
-        StringCchPrintfW(deskLnk, MAX_PATH, L"%s\\rapoo-tray.lnk", desktopDir);
+        StringCchPrintfW(deskLnk, MAX_PATH, L"%s\\razer-tray.lnk", desktopDir);
         DeleteFileW(deskLnk);
     }
 
@@ -248,7 +248,7 @@ static void DoUninstall() {
     WCHAR installDir[MAX_PATH];
     if (GetInstallDir(installDir, MAX_PATH)) {
         WCHAR appExe[MAX_PATH];
-        StringCchPrintfW(appExe, MAX_PATH, L"%s\\rapoo-tray.exe", installDir);
+        StringCchPrintfW(appExe, MAX_PATH, L"%s\\razer-tray.exe", installDir);
         DeleteFileW(appExe);
 
         WCHAR cmd[MAX_PATH * 3];
@@ -270,7 +270,7 @@ static LRESULT CALLBACK InstallerWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPA
             g_hFontBody = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
 
             // Title
-            HWND hTitle = CreateWindowExW(0, L"STATIC", L"rapoo-tray Setup", WS_CHILD | WS_VISIBLE, 24, 20, 360, 24, hWnd, NULL, g_hInstance, NULL);
+            HWND hTitle = CreateWindowExW(0, L"STATIC", L"razer-tray Setup", WS_CHILD | WS_VISIBLE, 24, 20, 360, 24, hWnd, NULL, g_hInstance, NULL);
             SendMessageW(hTitle, WM_SETFONT, (WPARAM)g_hFontTitle, TRUE);
 
             // Install Path
@@ -369,7 +369,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
-    wc.lpszClassName = L"rapoo-traySetupWndClass";
+    wc.lpszClassName = L"razer-traySetupWndClass";
     RegisterClassExW(&wc);
 
     int winWidth = 436;
@@ -380,7 +380,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     g_hMainWnd = CreateWindowExW(
         WS_EX_DLGMODALFRAME,
         wc.lpszClassName,
-        L"rapoo-tray Setup",
+        L"razer-tray Setup",
         WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
         screenX, screenY, winWidth, winHeight,
         NULL, NULL, hInstance, NULL

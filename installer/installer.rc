@@ -3,7 +3,7 @@
 #define IDR_APP_PAYLOAD 1001
 
 1 ICON "..\\res\\app.ico"
-IDR_APP_PAYLOAD RCDATA "..\\bin\\rapoo-tray.exe"
+IDR_APP_PAYLOAD RCDATA "..\\bin\\razer-tray.exe"
 
 1 VERSIONINFO
 FILEVERSION 1,2,0,0
@@ -19,23 +19,23 @@ BEGIN
         BLOCK "080404b0"
         BEGIN
             VALUE "CompanyName", "Iris"
-            VALUE "FileDescription", "rapoo-tray 安装程序"
+            VALUE "FileDescription", "razer-tray 安装程序"
             VALUE "FileVersion", "1.2.0.0"
-            VALUE "InternalName", "rapoo-tray-setup"
+            VALUE "InternalName", "razer-tray-setup"
             VALUE "LegalCopyright", "Copyright (C) 2026 Iris"
-            VALUE "OriginalFilename", "rapoo-tray-setup.exe"
-            VALUE "ProductName", "rapoo-tray"
+            VALUE "OriginalFilename", "razer-tray-setup.exe"
+            VALUE "ProductName", "razer-tray"
             VALUE "ProductVersion", "1.2.0.0"
         END
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "Iris"
-            VALUE "FileDescription", "rapoo-tray Setup"
+            VALUE "FileDescription", "razer-tray Setup"
             VALUE "FileVersion", "1.2.0.0"
-            VALUE "InternalName", "rapoo-tray-setup"
+            VALUE "InternalName", "razer-tray-setup"
             VALUE "LegalCopyright", "Copyright (C) 2026 Iris"
-            VALUE "OriginalFilename", "rapoo-tray-setup.exe"
-            VALUE "ProductName", "rapoo-tray"
+            VALUE "OriginalFilename", "razer-tray-setup.exe"
+            VALUE "ProductName", "razer-tray"
             VALUE "ProductVersion", "1.2.0.0"
         END
     END

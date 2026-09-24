@@ -1,6 +1,10 @@
 #include "osd_window.h"
+#include <dwmapi.h>
 #include <strsafe.h>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 
 namespace Osd {
 
@@ -10,12 +14,103 @@ static WCHAR g_textLine2[64] = {0};
 static WCHAR g_textLine3[64] = {0};
 static BYTE g_osdAlpha = 0;
 
-static const COLORREF OSD_KEY_COLOR = RGB(10, 12, 16);
 static const UINT_PTR TIMER_OSD_HIDE = 101;
 static const UINT_PTR TIMER_OSD_FADE = 102;
+static const BYTE OSD_ALPHA_MAX = 240;
+
+// The card uses the same acrylic recipe as the tray menu: the DWM blur behind
+// window plus the menu colour palette, so both surfaces look identical.
+enum ACCENT_STATE {
+    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
+    ACCENT_INVALID_STATE = 5
+};
+
+struct ACCENT_POLICY {
+    ACCENT_STATE AccentState;
+    DWORD AccentFlags;
+    DWORD GradientColor;
+    DWORD AnimationId;
+};
+
+struct WINDOWCOMPOSITIONATTRIBDATA {
+    DWORD Attrib;
+    PVOID pvData;
+    SIZE_T cbData;
+};
+
+typedef BOOL (WINAPI *pfnSetWindowCompositionAttribute)(HWND, WINDOWCOMPOSITIONATTRIBDATA*);
 
 static inline int ScaleDpi(int val, int dpi) {
     return MulDiv(val, dpi, 96);
+}
+
+// Signed distance of a rounded rectangle, negative inside.
+static float RoundedRectDistance(float x, float y, float left, float top, float right, float bottom, float radius) {
+    const float centerX = (left + right) * 0.5f;
+    const float centerY = (top + bottom) * 0.5f;
+    const float halfWidth = (right - left) * 0.5f;
+    const float halfHeight = (bottom - top) * 0.5f;
+    const float dx = std::max(std::fabs(x - centerX) - (halfWidth - radius), 0.0f);
+    const float dy = std::max(std::fabs(y - centerY) - (halfHeight - radius), 0.0f);
+    return std::sqrt(dx * dx + dy * dy) - radius;
+}
+
+// Draws the card outline with per pixel coverage so the rounded corners stay
+// smooth, then alpha blends it onto the acrylic surface.
+static void DrawAntialiasedBorder(HDC target, int width, int height, float radius,
+                                  float thickness, COLORREF color) {
+    HDC memDc = CreateCompatibleDC(target);
+    if (!memDc) return;
+
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    void* pixels = nullptr;
+    HBITMAP bitmap = CreateDIBSection(memDc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    if (!bitmap || !pixels) {
+        DeleteDC(memDc);
+        return;
+    }
+
+    uint32_t* buffer = (uint32_t*)pixels;
+    memset(buffer, 0, (size_t)width * height * sizeof(uint32_t));
+
+    const float inset = thickness * 0.5f;
+    const float half = thickness * 0.5f;
+    const float red = (float)GetRValue(color);
+    const float green = (float)GetGValue(color);
+    const float blue = (float)GetBValue(color);
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const float distance = RoundedRectDistance((float)x + 0.5f, (float)y + 0.5f,
+                                                       inset, inset, width - inset, height - inset, radius);
+            const float coverage = std::clamp(half + 0.5f - std::fabs(distance), 0.0f, 1.0f);
+            if (coverage <= 0.0f) continue;
+
+            const uint32_t alpha = (uint32_t)std::lround(coverage * 255.0f);
+            const uint32_t premulRed = (uint32_t)std::lround(red * coverage);
+            const uint32_t premulGreen = (uint32_t)std::lround(green * coverage);
+            const uint32_t premulBlue = (uint32_t)std::lround(blue * coverage);
+            buffer[y * width + x] = (alpha << 24) | (premulRed << 16) | (premulGreen << 8) | premulBlue;
+        }
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(memDc, bitmap);
+    BLENDFUNCTION blend = {};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+    AlphaBlend(target, 0, 0, width, height, memDc, 0, 0, width, height, blend);
+
+    SelectObject(memDc, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memDc);
 }
 
 static UINT GetCurrentWindowDpi(HWND hWnd) {
@@ -31,8 +126,47 @@ static UINT GetCurrentWindowDpi(HWND hWnd) {
     return 96;
 }
 
+static bool IsDarkMode() {
+    bool isDark = true;
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                      0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        DWORD val = 1, size = sizeof(DWORD), type = 0;
+        if (RegQueryValueExW(hKey, L"SystemUsesLightTheme", NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
+            isDark = (val == 0);
+        }
+        RegCloseKey(hKey);
+    }
+    return isDark;
+}
+
+static void ApplyCardStyle(HWND hWnd, bool isDark) {
+    HMODULE hUser = GetModuleHandleW(L"user32.dll");
+    if (hUser) {
+        auto fnSetWindowCompositionAttribute =
+            (pfnSetWindowCompositionAttribute)GetProcAddress(hUser, "SetWindowCompositionAttribute");
+        if (fnSetWindowCompositionAttribute) {
+            ACCENT_POLICY policy = {};
+            policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
+            policy.AccentFlags = 0;
+            policy.GradientColor = isDark ? 0xCC1A1B20 : 0xD8F8F9FA; // AABBGGRR
+            WINDOWCOMPOSITIONATTRIBDATA data = { 19, &policy, sizeof(policy) };
+            fnSetWindowCompositionAttribute(hWnd, &data);
+        }
+    }
+
+    BOOL dark = isDark ? TRUE : FALSE;
+    DwmSetWindowAttribute(hWnd, 20, &dark, sizeof(dark));   // DWMWA_USE_IMMERSIVE_DARK_MODE
+    DWORD corner = 2;                                       // DWMWCP_ROUND, keeps the corners antialiased
+    DwmSetWindowAttribute(hWnd, 33, &corner, sizeof(corner));
+}
+
 static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+        case WM_NCHITTEST:
+            return HTTRANSPARENT;
+
         case WM_ERASEBKGND:
             return 1;
 
@@ -42,71 +176,68 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             RECT rc;
             GetClientRect(hWnd, &rc);
 
+            const UINT dpi = GetCurrentWindowDpi(hWnd);
+            auto S = [dpi](int v) { return ScaleDpi(v, dpi); };
+            const bool darkMode = IsDarkMode();
+
             HDC memDC = CreateCompatibleDC(hdc);
             HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
             HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
 
-            UINT dpi = GetCurrentWindowDpi(hWnd);
-            auto S = [dpi](int v) { return ScaleDpi(v, dpi); };
+            const COLORREF bgCol = darkMode ? RGB(24, 26, 32) : RGB(248, 248, 252);
+            // A clearly visible 1 px frame with antialiased corners.
+            const COLORREF borderCol = darkMode ? RGB(104, 112, 130) : RGB(186, 192, 204);
+            const COLORREF titleCol = darkMode ? RGB(235, 240, 248) : RGB(30, 35, 45);
+            const COLORREF subCol = darkMode ? RGB(180, 192, 210) : RGB(90, 100, 115);
+            const COLORREF accentCol = darkMode ? RGB(68, 214, 44) : RGB(22, 163, 74);
 
-            // Fill with Key Color for transparency
-            HBRUSH hKey = CreateSolidBrush(OSD_KEY_COLOR);
-            FillRect(memDC, &rc, hKey);
-            DeleteObject(hKey);
+            HBRUSH bgBrush = CreateSolidBrush(bgCol);
+            FillRect(memDC, &rc, bgBrush);
+            DeleteObject(bgBrush);
+
+            // Radius matches the DWM corner rounding so the frame follows the card.
+            DrawAntialiasedBorder(memDC, rc.right, rc.bottom,
+                                  (float)std::min(S(8), (int)(rc.bottom / 2)),
+                                  (float)std::max(1, S(1)), borderCol);
 
             RECT rcBox = rc;
             InflateRect(&rcBox, -S(2), -S(2));
-
-            // Modern frosted card background & border
-            HBRUSH hBg = CreateSolidBrush(RGB(22, 25, 34));
-            HPEN hBorder = CreatePen(PS_SOLID, 1, RGB(70, 78, 96));
-            HGDIOBJ oldBr = SelectObject(memDC, hBg);
-            HGDIOBJ oldPen = SelectObject(memDC, hBorder);
-
-            RoundRect(memDC, rcBox.left, rcBox.top, rcBox.right, rcBox.bottom, S(16), S(16));
-
             SetBkMode(memDC, TRANSPARENT);
 
-            bool hasLine3 = (g_textLine3[0] != 0);
+            const bool hasLine3 = (g_textLine3[0] != 0);
 
-            // Font 1: Line 1 (Large bold title)
             HFONT hFontBig = CreateFontW(
                 -S(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI"
-            );
+                CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
             HGDIOBJ oldFont = SelectObject(memDC, hFontBig);
-            SetTextColor(memDC, RGB(255, 255, 255));
+            SetTextColor(memDC, titleCol);
 
             RECT rcTop = rcBox;
             rcTop.top = rcBox.top + S(8);
             rcTop.bottom = rcTop.top + S(26);
             DrawTextW(memDC, g_textLine1, -1, &rcTop, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-            // Font 2: Line 2 (Sub text)
             HFONT hFontMid = CreateFontW(
                 -S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI"
-            );
+                CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
             SelectObject(memDC, hFontMid);
-            SetTextColor(memDC, RGB(210, 222, 238));
+            SetTextColor(memDC, subCol);
 
             RECT rcMid = rcBox;
             rcMid.top = rcTop.bottom + S(2);
             rcMid.bottom = rcMid.top + S(22);
             DrawTextW(memDC, g_textLine2, -1, &rcMid, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-            // Font 3: Line 3 (Status bar / Cyan highlight)
             HFONT hFontSub = NULL;
             if (hasLine3) {
                 hFontSub = CreateFontW(
                     -S(12), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                    CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI"
-                );
+                    CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
                 SelectObject(memDC, hFontSub);
-                SetTextColor(memDC, RGB(120, 210, 255));
+                SetTextColor(memDC, accentCol);
 
                 RECT rcBot = rcBox;
                 rcBot.top = rcMid.bottom + S(2);
@@ -117,17 +248,12 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
 
             SelectObject(memDC, oldFont);
-            SelectObject(memDC, oldPen);
-            SelectObject(memDC, oldBr);
             SelectObject(memDC, oldBmp);
             DeleteObject(memBmp);
             DeleteDC(memDC);
-
             DeleteObject(hFontBig);
             DeleteObject(hFontMid);
             if (hFontSub) DeleteObject(hFontSub);
-            DeleteObject(hBorder);
-            DeleteObject(hBg);
 
             EndPaint(hWnd, &ps);
             return 0;
@@ -136,23 +262,16 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
         case WM_TIMER: {
             if (wParam == TIMER_OSD_HIDE) {
                 KillTimer(hWnd, TIMER_OSD_HIDE);
-                SetTimer(hWnd, TIMER_OSD_FADE, 16, NULL);
-            } else if (wParam == TIMER_OSD_FADE) {
-                if (g_osdAlpha > 15) {
-                    g_osdAlpha -= 15;
-                    SetLayeredWindowAttributes(hWnd, OSD_KEY_COLOR, g_osdAlpha, LWA_COLORKEY | LWA_ALPHA);
-                } else {
-                    KillTimer(hWnd, TIMER_OSD_FADE);
-                    ShowWindow(hWnd, SW_HIDE);
-                    g_osdAlpha = 0;
-                }
+                ShowWindow(hWnd, SW_HIDE);
+                g_osdAlpha = 0;
             }
             return 0;
         }
 
-        default:
-            return DefWindowProcW(hWnd, msg, wParam, lParam);
+        case WM_DESTROY:
+            return 0;
     }
+    return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
 bool Init(HINSTANCE hInstance) {
@@ -160,14 +279,16 @@ bool Init(HINSTANCE hInstance) {
     wc.cbSize = sizeof(WNDCLASSEXW);
     wc.lpfnWndProc = OsdWndProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = L"RapooOsdPopupWnd";
+    wc.lpszClassName = L"RazerOsdPopupWnd";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     RegisterClassExW(&wc);
 
     g_hOsdWnd = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        // Deliberately not layered: DWM only applies the acrylic backdrop to
+        // regular window surfaces, and the menu uses exactly the same setup.
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
         wc.lpszClassName,
-        L"RapooOSD",
+        L"RazerOSD",
         WS_POPUP,
         0, 0, 300, 96,
         NULL, NULL, hInstance, NULL
@@ -265,33 +386,38 @@ void Show(const WCHAR* line1, const WCHAR* line2, const WCHAR* line3) {
     KillTimer(g_hOsdWnd, TIMER_OSD_HIDE);
     KillTimer(g_hOsdWnd, TIMER_OSD_FADE);
 
-    g_osdAlpha = 240;
-    SetLayeredWindowAttributes(g_hOsdWnd, OSD_KEY_COLOR, g_osdAlpha, LWA_COLORKEY | LWA_ALPHA);
+    ApplyCardStyle(g_hOsdWnd, IsDarkMode());
 
-    SetWindowPos(g_hOsdWnd, HWND_TOPMOST, x, y, targetW, targetH, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    g_osdAlpha = OSD_ALPHA_MAX;
+    SetWindowPos(g_hOsdWnd, HWND_TOPMOST, x, y, targetW, targetH,
+                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
     InvalidateRect(g_hOsdWnd, NULL, TRUE);
+    UpdateWindow(g_hOsdWnd);
 
     SetTimer(g_hOsdWnd, TIMER_OSD_HIDE, 1600, NULL);
 }
 
-void ShowDpiUpdate(int level, int dpix, int dpiy, int battery, int pollingHz, bool isCharging, bool isWired, const WCHAR* modelName) {
-    WCHAR l1[64], l2[64], l3[64];
-    const WCHAR* mName = (modelName && modelName[0]) ? modelName : L"雷柏游戏鼠标";
-    StringCchPrintfW(l1, ARRAYSIZE(l1), L"%s  DPI %d", mName, dpix);
-    StringCchPrintfW(l2, ARRAYSIZE(l2), L"X 轴: %d    Y 轴: %d", dpix, dpiy);
-
-    const WCHAR* modeStr = isWired ? L"USB" : L"2.4G";
-    const WCHAR* batIcon = isCharging ? L"⚡" : L"🔋";
-    StringCchPrintfW(l3, ARRAYSIZE(l3), L"%s  |  第 %d 档  |  %s %d%%  |  %d Hz",
-        modeStr, level, batIcon, battery, pollingHz);
-
+void ShowDeviceStatus(const Device::State& state) {
+    WCHAR l1[96], l2[96], l3[160];
+    StringCchCopyW(l1, ARRAYSIZE(l1), state.modelName[0] ? state.modelName : L"Razer 鼠标");
+    if (!state.isConnected) {
+        if (state.receiverPresent) {
+            Show(l1, L"接收器已就绪 · 鼠标未连接", L"打开鼠标电源或移动鼠标唤醒后会自动恢复");
+        } else {
+            Show(l1, L"未连接 · 请检查鼠标或接收器", L"检测到设备后会显示电量、DPI 和轮询率");
+        }
+        return;
+    }
+    StringCchPrintfW(l2, ARRAYSIZE(l2), L"已连接 · %s", state.isWired ? L"USB 有线" : L"2.4 GHz 无线");
+    WCHAR battery[40], dpi[48], polling[40];
+    if (!state.hasBattery) StringCchCopyW(battery, ARRAYSIZE(battery), L"电量 --");
+    else StringCchPrintfW(battery, ARRAYSIZE(battery), L"电量 %d%%%s", state.battery, state.isCharging ? L" · 充电中" : L"");
+    if (!state.hasDpi) StringCchCopyW(dpi, ARRAYSIZE(dpi), L"DPI --");
+    else StringCchPrintfW(dpi, ARRAYSIZE(dpi), L"DPI %d", state.dpiX);
+    if (!state.hasPollingRate) StringCchCopyW(polling, ARRAYSIZE(polling), L"轮询率 --");
+    else StringCchPrintfW(polling, ARRAYSIZE(polling), L"轮询率 %d Hz", state.pollingHz);
+    StringCchPrintfW(l3, ARRAYSIZE(l3), L"%s   ·   %s   ·   %s", battery, dpi, polling);
     Show(l1, l2, l3);
-}
-
-void ShowStyleOsd(int style) {
-    const WCHAR* names[] = { L"样式一：经典电池", L"样式二：状态圆点", L"样式三：大号数字" };
-    int idx = std::clamp(style, 0, 2);
-    Show(L"电池图标样式", names[idx], L"双击托盘图标可循环切换");
 }
 
 } // namespace Osd

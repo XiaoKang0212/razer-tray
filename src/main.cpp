@@ -3,18 +3,34 @@
 #include <dbt.h>
 #include <hidsdi.h>
 #include <strsafe.h>
-#include "rapoo_protocol.h"
 #include "device_manager.h"
 #include "osd_window.h"
 #include "tray_menu.h"
 
 static const UINT WM_APP_TRAYMSG = WM_APP + 1;
 static const UINT WM_APP_STATE_UPDATE = WM_APP + 2;
+static const UINT_PTR TIMER_STATUS_OSD = 301;
 
 static HWND g_hMainWnd = NULL;
 static NOTIFYICONDATAW g_nid = {0};
 static UINT g_uTaskbarRestartMsg = 0;
 static HICON g_hCurrentTrayIcon = NULL;
+static bool g_statusOsdPending = false;
+
+static void ShowPendingStatusOsd() {
+    if (!g_statusOsdPending) return;
+    g_statusOsdPending = false;
+    if (g_hMainWnd) KillTimer(g_hMainWnd, TIMER_STATUS_OSD);
+    Osd::ShowDeviceStatus(Device::GetCurrentState());
+}
+
+// A click on the tray icon reads battery, DPI and polling rate again and shows
+// the OSD once the fresh values arrived.
+static void RequestStatusOsd() {
+    g_statusOsdPending = true;
+    if (g_hMainWnd) SetTimer(g_hMainWnd, TIMER_STATUS_OSD, 2500, NULL);
+    Device::RequestRefresh();
+}
 
 static void RefreshTrayUI(const Device::State& state) {
     if (!g_hMainWnd) return;
@@ -32,7 +48,8 @@ static void RefreshTrayUI(const Device::State& state) {
     int iconSize = GetSystemMetrics(SM_CXSMICON);
     if (iconSize <= 0) iconSize = 16;
 
-    HICON hNewIcon = Tray::CreateBatteryIcon(state.battery, state.isCharging, state.isConnected, iconSize, isDark);
+    HICON hNewIcon = Tray::CreateBatteryIcon(state.battery, state.isCharging, state.isConnected,
+                                            iconSize, isDark, Tray::GetBatteryDisplayStyle());
     if (hNewIcon) {
         g_nid.hIcon = hNewIcon;
         Tray::UpdateTooltip(g_nid, state);
@@ -48,21 +65,12 @@ static void RefreshTrayUI(const Device::State& state) {
 static void OnDeviceStateChanged(const Device::State& state, DWORD changeMask) {
     if (!g_hMainWnd) return;
 
-    // Show dynamic OSD on DPI changes
-    if (changeMask & Device::CHANGE_DPI) {
-        Osd::ShowDpiUpdate(
-            state.dpiLevel,
-            state.dpiX,
-            state.dpiY,
-            state.battery,
-            state.pollingHz,
-            state.isCharging,
-            state.isWired,
-            state.modelName
-        );
+    // Show dynamic OSD on DPI changes, unless a manual refresh is already showing it
+    if ((changeMask & Device::CHANGE_DPI) && !g_statusOsdPending) {
+        Osd::ShowDeviceStatus(state);
     }
 
-    PostMessageW(g_hMainWnd, WM_APP_STATE_UPDATE, 0, 0);
+    PostMessageW(g_hMainWnd, WM_APP_STATE_UPDATE, (WPARAM)changeMask, 0);
 }
 
 static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -74,37 +82,34 @@ static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
     switch (msg) {
         case WM_APP_TRAYMSG: {
-            if (lParam == WM_LBUTTONUP) {
-                Device::State st = Device::GetCurrentState();
-                if (st.isConnected) {
-                    Osd::ShowDpiUpdate(
-                        st.dpiLevel,
-                        st.dpiX,
-                        st.dpiY,
-                        st.battery,
-                        st.pollingHz,
-                        st.isCharging,
-                        st.isWired,
-                        st.modelName
-                    );
-                } else {
-                    const WCHAR* mName = st.modelName[0] ? st.modelName : L"雷柏游戏鼠标";
-                    Osd::Show(mName, L"设备休眠 / 未连接", L"请移动鼠标唤醒或插上 USB 线");
-                }
+            if (lParam == WM_LBUTTONUP || lParam == WM_LBUTTONDBLCLK) {
+                RequestStatusOsd();
             } else if (lParam == WM_RBUTTONUP) {
                 SetForegroundWindow(hWnd);
+                if (g_statusOsdPending) {
+                    g_statusOsdPending = false;
+                    KillTimer(hWnd, TIMER_STATUS_OSD);
+                }
+                Device::RefreshBlocking(2000);
                 Tray::ShowMenu(hWnd);
-            } else if (lParam == WM_LBUTTONDBLCLK) {
-                int s = Tray::CycleBatteryStyle();
-                Osd::ShowStyleOsd(s);
-                RefreshTrayUI(Device::GetCurrentState());
             }
             return 0;
         }
 
         case WM_APP_STATE_UPDATE: {
             RefreshTrayUI(Device::GetCurrentState());
+            if (g_statusOsdPending && ((DWORD)wParam & Device::CHANGE_REFRESHED)) {
+                ShowPendingStatusOsd();
+            }
             return 0;
+        }
+
+        case WM_TIMER: {
+            if (wParam == TIMER_STATUS_OSD) {
+                ShowPendingStatusOsd();
+                return 0;
+            }
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
         }
 
         case WM_SETTINGCHANGE:
@@ -137,7 +142,7 @@ static LRESULT CALLBACK MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
     // Single instance protection
-    HANDLE hMutex = CreateMutexW(NULL, TRUE, L"Local\\rapoo-traySingleInstance");
+    HANDLE hMutex = CreateMutexW(NULL, TRUE, L"Local\\razer-traySingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(hMutex);
         return 0;
@@ -161,11 +166,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     wc.hInstance = hInstance;
     wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
     wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
-    wc.lpszClassName = L"RapooTrayMessageWnd";
+    wc.lpszClassName = L"RazerTrayMessageWnd";
     RegisterClassExW(&wc);
 
     g_hMainWnd = CreateWindowExW(
-        0, wc.lpszClassName, L"RapooTray",
+        0, wc.lpszClassName, L"RazerTray",
         WS_POPUP, 0, 0, 0, 0,
         NULL, NULL, hInstance, NULL
     );
@@ -189,7 +194,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_nid.uCallbackMessage = WM_APP_TRAYMSG;
     g_nid.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
-    StringCchCopyW(g_nid.szTip, ARRAYSIZE(g_nid.szTip), L"雷柏游戏鼠标 (正在连接...)");
+    StringCchCopyW(g_nid.szTip, ARRAYSIZE(g_nid.szTip), L"Razer mouse (searching...)");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
     // Start background HID Device Manager
