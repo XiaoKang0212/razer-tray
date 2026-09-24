@@ -5,7 +5,7 @@ namespace Tray {
 
 // Battery indicator styles for the notification area icon.
 enum BatteryDisplayStyle {
-    BATTERY_STYLE_RING = 0,     // circular gauge around the three headed snake
+    BATTERY_STYLE_RING = 0,     // circular gauge around the project mouse mark
     BATTERY_STYLE_BATTERY = 1,  // classic battery shape with a level fill
     BATTERY_STYLE_NUMBER = 2,   // battery percentage as text
 };

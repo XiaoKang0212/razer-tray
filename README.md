@@ -1,7 +1,7 @@
 # razer-tray
 
 <div align="center">
-  <img src="res/logo.png" width="120" height="120" alt="Razer 三头蛇标志" />
+  <img src="res/logo.png" width="120" height="120" alt="razer-tray 项目标志：简约游戏鼠标" />
   <h1>razer-tray</h1>
   <p>常驻 Windows 托盘的雷蛇鼠标状态工具</p>
   <p><b>连接状态 · 电量 · DPI · 轮询率</b></p>
@@ -31,7 +31,7 @@
   Feature 报文的鼠标接口），无需选择设备。
 - **三种电量显示**：右键菜单「电量显示」可在 **环形电量 / 电池图标 / 数字显示** 之间切换，
   选择结果写入注册表，重启后保持。
-- **环形样式**：中心三头蛇标志 + 外围电量环。整圈为绿色底环，较亮的弧段表示已用电量
+- **环形样式**：中心为项目自制的简约鼠标标志 + 外围电量环。整圈为绿色底环，较亮的弧段表示已用电量
   （<30% 转橙色、<15% 转红色），中心保持透明、不填充底色；未连接时整体变暗。
 - **连接检测**：区分「接收器已插入」与「鼠标已开机」。鼠标电源关闭时显示
   「接收器已就绪 · 鼠标未连接」，唤醒后自动恢复。
@@ -75,7 +75,7 @@ OSD 状态提示：
 
 | 样式 | 说明 | 注册表值 |
 | --- | --- | --- |
-| 环形电量（默认） | 圆环按电量填充，中心为三头蛇标志 | `BatteryStyle = 0` |
+| 环形电量（默认） | 圆环按电量填充，中心为项目鼠标标志 | `BatteryStyle = 0` |
 | 电池图标 | 经典横向电池，按电量填充 | `BatteryStyle = 1` |
 | 数字显示 | 直接显示电量百分比数字 | `BatteryStyle = 2` |
 
@@ -177,8 +177,11 @@ build.bat
 
 ```bat
 installer\build_installer.bat   :: 需要先有 bin\razer-tray.exe，产物 dist\razer-tray-setup.exe
-powershell -File tools\make_logo_mask.ps1   :: 由 res\logo.png 重新生成 res\logo_mask.bin
+powershell -File tools\make_logo.ps1        :: 用代码重绘标志，输出 res\logo.png / logo_mask.bin / app.ico
 ```
+
+`tools\make_logo.ps1` 中的标志完全由本项目用基础图形绘制（圆角机身 + 滚轮开孔 + 按键分缝 + 侧键缺口），
+不对应任何厂商的标志；想换成自己的图形时，只需替换该脚本或直接替换 `res\logo.png` 与 `res\logo_mask.bin`。
 
 ## 目录结构
 
@@ -192,11 +195,11 @@ razer-tray/
 │  └─ osd_window.cpp      OSD 提示窗口
 ├─ res/
 │  ├─ app.ico             程序图标（多尺寸）
-│  ├─ logo.png            三头蛇图形源文件
-│  ├─ logo_mask.bin       由 logo.png 生成的字形掩膜
+│  ├─ logo.png            项目标志（原创简约鼠标，脚本生成）
+│  ├─ logo_mask.bin       由同一脚本生成的字形掩膜（托盘图标用）
 │  ├─ app.rc / app.manifest
 ├─ installer/             可选安装包工程
-├─ tools/make_logo_mask.ps1
+├─ tools/make_logo.ps1    用代码重绘标志与图标
 ├─ docs/                  截图
 ├─ build.bat
 └─ LICENSE
@@ -206,6 +209,8 @@ razer-tray/
 
 - 本项目是个人自用的免费开源工具，与任何硬件厂商均无隶属、赞助、授权或背书关系。
 - 文中出现的产品名称与商标归各自所有者，在此仅用于说明兼容性。
+- 界面标志与图标由本项目自行绘制（源码见 `tools/make_logo.ps1`，为基础图形拼合的简约鼠标造型），
+  未使用任何厂商的标志、图标或界面素材；项目名称中的「razer」仅用于说明所兼容的设备品牌。
 - 本工具只读取设备状态，不修改设备设置，也不包含任何厂商的官方软件、驱动或固件。
 - 软件按「现状」提供，不承诺在所有设备或固件版本上都可用；使用风险由使用者自行承担。
 
