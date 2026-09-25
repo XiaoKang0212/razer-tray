@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "theme.h"
 
 namespace Tray {
 
@@ -58,12 +59,10 @@ typedef struct _WINDOWCOMPOSITIONATTRIBDATA {
 } WINDOWCOMPOSITIONATTRIBDATA;
 
 typedef BOOL (WINAPI *pfnSetWindowCompositionAttribute)(HWND, WINDOWCOMPOSITIONATTRIBDATA*);
-typedef BOOL (WINAPI *pfnShouldAppsUseDarkMode)();
 typedef BOOL (WINAPI *pfnAllowDarkModeForWindow)(HWND, BOOL);
 typedef void (WINAPI *pfnFlushMenuThemes)();
 
 static pfnSetWindowCompositionAttribute fnSetWindowCompositionAttribute = NULL;
-static pfnShouldAppsUseDarkMode fnShouldAppsUseDarkMode = NULL;
 static pfnAllowDarkModeForWindow fnAllowDarkModeForWindow = NULL;
 static pfnFlushMenuThemes fnFlushMenuThemes = NULL;
 
@@ -74,24 +73,9 @@ void InitTheme() {
     }
     HMODULE hUx = LoadLibraryExW(L"uxtheme.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (hUx) {
-        fnShouldAppsUseDarkMode = (pfnShouldAppsUseDarkMode)GetProcAddress(hUx, MAKEINTRESOURCEA(132));
         fnAllowDarkModeForWindow = (pfnAllowDarkModeForWindow)GetProcAddress(hUx, MAKEINTRESOURCEA(133));
         fnFlushMenuThemes = (pfnFlushMenuThemes)GetProcAddress(hUx, MAKEINTRESOURCEA(136));
     }
-}
-
-static bool IsSystemDarkMode() {
-    if (fnShouldAppsUseDarkMode) return fnShouldAppsUseDarkMode();
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        DWORD val = 1, size = sizeof(DWORD), type = 0;
-        if (RegQueryValueExW(hKey, L"AppsUseLightTheme", NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
-            RegCloseKey(hKey);
-            return (val == 0);
-        }
-        RegCloseKey(hKey);
-    }
-    return false;
 }
 
 static void ApplyModernWindowStyle(HWND hWnd, bool isDark, int w = 0, int h = 0) {
@@ -912,7 +896,7 @@ void ShowMenu(HWND hWndOwner) {
     if (g_bModalLoop) return;
     Device::RefreshPollingRate();
     g_hParentAppWnd = hWndOwner;
-    g_curDark = IsSystemDarkMode();
+    g_curDark = Theme::IsSystemDarkMode();
 
     POINT pt;
     GetCursorPos(&pt);

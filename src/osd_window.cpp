@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include "theme.h"
 
 namespace Osd {
 
@@ -126,21 +127,6 @@ static UINT GetCurrentWindowDpi(HWND hWnd) {
     return 96;
 }
 
-static bool IsDarkMode() {
-    bool isDark = true;
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                      0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        DWORD val = 1, size = sizeof(DWORD), type = 0;
-        if (RegQueryValueExW(hKey, L"SystemUsesLightTheme", NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
-            isDark = (val == 0);
-        }
-        RegCloseKey(hKey);
-    }
-    return isDark;
-}
-
 static void ApplyCardStyle(HWND hWnd, bool isDark) {
     HMODULE hUser = GetModuleHandleW(L"user32.dll");
     if (hUser) {
@@ -178,7 +164,7 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
             const UINT dpi = GetCurrentWindowDpi(hWnd);
             auto S = [dpi](int v) { return ScaleDpi(v, dpi); };
-            const bool darkMode = IsDarkMode();
+            const bool darkMode = Theme::IsSystemDarkMode();
 
             HDC memDC = CreateCompatibleDC(hdc);
             HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
@@ -386,7 +372,7 @@ void Show(const WCHAR* line1, const WCHAR* line2, const WCHAR* line3) {
     KillTimer(g_hOsdWnd, TIMER_OSD_HIDE);
     KillTimer(g_hOsdWnd, TIMER_OSD_FADE);
 
-    ApplyCardStyle(g_hOsdWnd, IsDarkMode());
+    ApplyCardStyle(g_hOsdWnd, Theme::IsSystemDarkMode());
 
     g_osdAlpha = OSD_ALPHA_MAX;
     SetWindowPos(g_hOsdWnd, HWND_TOPMOST, x, y, targetW, targetH,

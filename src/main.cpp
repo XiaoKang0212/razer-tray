@@ -6,6 +6,7 @@
 #include "device_manager.h"
 #include "osd_window.h"
 #include "tray_menu.h"
+#include "theme.h"
 
 static const UINT WM_APP_TRAYMSG = WM_APP + 1;
 static const UINT WM_APP_STATE_UPDATE = WM_APP + 2;
@@ -35,15 +36,7 @@ static void RequestStatusOsd() {
 static void RefreshTrayUI(const Device::State& state) {
     if (!g_hMainWnd) return;
 
-    bool isDark = true;
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        DWORD val = 1, size = sizeof(DWORD), type = 0;
-        if (RegQueryValueExW(hKey, L"SystemUsesLightTheme", NULL, &type, (LPBYTE)&val, &size) == ERROR_SUCCESS) {
-            isDark = (val == 0);
-        }
-        RegCloseKey(hKey);
-    }
+    const bool isDark = Theme::IsSystemDarkMode();
 
     int iconSize = GetSystemMetrics(SM_CXSMICON);
     if (iconSize <= 0) iconSize = 16;

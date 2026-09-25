@@ -18,7 +18,6 @@ namespace {
 
 constexpr int RAZER_PAYLOAD_LENGTH = 90;   // Razer protocol payload, without the HID report id
 constexpr int MAX_CANDIDATES = 12;
-constexpr int MAX_PROBED_CANDIDATES = 4;
 constexpr int MAX_LOG_LINES = 20000;
 constexpr ULONGLONG TELEMETRY_INTERVAL_MS = 10000;
 
@@ -157,6 +156,9 @@ struct Candidate {
     WCHAR model[64] = {};
     bool wireless = false;
     bool knownModel = false;
+    bool unadvertisedControlReport = false;
+    bool fixedTransactionId = false;
+    bool extendedResponseWait = false;
     int featureLength = RAZER_PAYLOAD_LENGTH;
 };
 
@@ -183,6 +185,12 @@ const ModelDef* FindModel(const WCHAR* path) {
         if (wcsstr(path, needle)) return &model;
     }
     return nullptr;
+}
+
+bool IsDeathAdderV3Pro(const ModelDef* model) {
+    return model &&
+        (!_wcsicmp(model->pid, L"00b6") || !_wcsicmp(model->pid, L"00b7") ||
+         !_wcsicmp(model->pid, L"00c2") || !_wcsicmp(model->pid, L"00c3"));
 }
 
 bool LooksLikeMouse(const WCHAR* product) {
@@ -238,16 +246,27 @@ void CollectCandidates(std::vector<Candidate>& out) {
         }
 
         int featureLength = 0;
+        USAGE usagePage = 0;
+        USAGE usage = 0;
         PHIDP_PREPARSED_DATA preparsed = nullptr;
         if (HidD_GetPreparsedData(probe, &preparsed)) {
             HIDP_CAPS caps = {};
             if (HidP_GetCaps(preparsed, &caps) == HIDP_STATUS_SUCCESS) {
                 featureLength = caps.FeatureReportByteLength;
+                usagePage = caps.UsagePage;
+                usage = caps.Usage;
             }
             HidD_FreePreparsedData(preparsed);
         }
 
-        // The Razer control channel is the interface carrying the 90 byte feature report.
+        // Some DeathAdder V3 Pro revisions omit the control report from their HID
+        // descriptor. Their control channel is MI_00, the Generic Desktop Mouse
+        // collection, so probe it with the standard payload and report-id byte.
+        const bool unadvertisedControlReport = featureLength == 0 && IsDeathAdderV3Pro(model) &&
+            usagePage == 0x01 && usage == 0x02 && wcsstr(lower, L"&mi_00&");
+        if (unadvertisedControlReport) featureLength = RAZER_PAYLOAD_LENGTH + 1;
+
+        // Normally the Razer control channel is the interface carrying the 90 byte feature report.
         if (featureLength < RAZER_PAYLOAD_LENGTH || featureLength > RAZER_PAYLOAD_LENGTH + 1) {
             if (model && FirstLogFor(detail->DevicePath)) {
                 LogLine(L"skip %s featureLength=%d (not the control interface)", model->name, featureLength);
@@ -261,6 +280,9 @@ void CollectCandidates(std::vector<Candidate>& out) {
         candidate.featureLength = featureLength;
         candidate.knownModel = (model != nullptr);
         candidate.wireless = model ? model->wireless : false;
+        candidate.unadvertisedControlReport = unadvertisedControlReport;
+        candidate.fixedTransactionId = IsDeathAdderV3Pro(model);
+        candidate.extendedResponseWait = candidate.fixedTransactionId && candidate.wireless;
 
         if (model) {
             StringCchCopyW(candidate.model, ARRAYSIZE(candidate.model), model->name);
@@ -283,15 +305,16 @@ void CollectCandidates(std::vector<Candidate>& out) {
         }
         CloseHandle(probe);
         if (FirstLogFor(detail->DevicePath)) {
-            LogLine(L"candidate model=%s featureLength=%d wireless=%d known=%d",
-                    candidate.model, featureLength, candidate.wireless ? 1 : 0, candidate.knownModel ? 1 : 0);
+            LogLine(L"candidate model=%s featureLength=%d wireless=%d known=%d unadvertised=%d",
+                    candidate.model, featureLength, candidate.wireless ? 1 : 0,
+                    candidate.knownModel ? 1 : 0, candidate.unadvertisedControlReport ? 1 : 0);
         }
         out.push_back(candidate);
     }
     SetupDiDestroyDeviceInfoList(info);
 }
 
-bool SendCommand(HANDLE hid, int featureLength, BYTE transaction, BYTE commandClass, BYTE commandId,
+bool SendCommand(HANDLE hid, const Candidate& device, BYTE transaction, BYTE commandClass, BYTE commandId,
                  const BYTE* args, BYTE argLength, Reply& reply) {
     BYTE payload[RAZER_PAYLOAD_LENGTH] = {};
     payload[0] = 0x00;                              // status: new command
@@ -309,21 +332,23 @@ bool SendCommand(HANDLE hid, int featureLength, BYTE transaction, BYTE commandCl
     payload[89] = 0x00;
 
     // Windows HID buffers carry the report id when the descriptor declares one.
-    const int offset = featureLength - RAZER_PAYLOAD_LENGTH;
+    const int offset = device.featureLength - RAZER_PAYLOAD_LENGTH;
     BYTE outbound[RAZER_PAYLOAD_LENGTH + 1] = {};
     memcpy(outbound + offset, payload, RAZER_PAYLOAD_LENGTH);
-    if (!HidD_SetFeature(hid, outbound, featureLength)) return false;
+    if (!HidD_SetFeature(hid, outbound, device.featureLength)) return false;
 
     Sleep(2);
-    for (int attempt = 0; attempt < 8; ++attempt) {
+    const int responseAttempts = device.extendedResponseWait ? 32 : 8;
+    const DWORD responseIntervalMs = device.extendedResponseWait ? 5 : 3;
+    for (int attempt = 0; attempt < responseAttempts; ++attempt) {
         BYTE inbound[RAZER_PAYLOAD_LENGTH + 1] = {};
-        if (!HidD_GetFeature(hid, inbound, featureLength)) {
-            Sleep(3);
+        if (!HidD_GetFeature(hid, inbound, device.featureLength)) {
+            Sleep(responseIntervalMs);
             continue;
         }
         const BYTE* response = inbound + offset;
         if (response[0] == RAZER_CMD_BUSY) {
-            Sleep(4);
+            Sleep(responseIntervalMs);
             continue;
         }
         reply.status = response[0];
@@ -339,14 +364,16 @@ bool SendCommand(HANDLE hid, int featureLength, BYTE transaction, BYTE commandCl
     return false;
 }
 
-bool QueryRazer(HANDLE hid, int featureLength, BYTE commandClass, BYTE commandId,
+bool QueryRazer(HANDLE hid, const Candidate& device, BYTE commandClass, BYTE commandId,
                 const BYTE* args, BYTE argLength, Reply& reply, const WCHAR* label, bool logSuccess = true) {
     const BYTE transactions[] = {0x1F, 0x3F, 0xFF};
     BYTE lastStatus = 0x00;
-    for (BYTE transaction : transactions) {
+    const int transactionCount = device.fixedTransactionId ? 1 : ARRAYSIZE(transactions);
+    for (int transactionIndex = 0; transactionIndex < transactionCount; ++transactionIndex) {
+        const BYTE transaction = transactions[transactionIndex];
         for (int attempt = 0; attempt < 2; ++attempt) {
             Reply candidate;
-            if (SendCommand(hid, featureLength, transaction, commandClass, commandId, args, argLength, candidate)) {
+            if (SendCommand(hid, device, transaction, commandClass, commandId, args, argLength, candidate)) {
                 if (logSuccess) {
                     LogLine(L"%s ok class=%02X id=%02X tx=%02X size=%02d args=%02X %02X %02X %02X %02X %02X",
                             label, commandClass, commandId, transaction, candidate.dataSize,
@@ -388,7 +415,7 @@ TelemetryResult ReadTelemetry(const Candidate& device, State& state) {
     Reply reply;
 
     // Battery level: raw 0-255 from the device, 0 means "no reading".
-    if (QueryRazer(hid, device.featureLength, 0x07, 0x80, args, 2, reply, L"battery", false)) {
+    if (QueryRazer(hid, device, 0x07, 0x80, args, 2, reply, L"battery", false)) {
         const BYTE raw = reply.args[1];
         if (raw > 0) {
             state.battery = (raw * 100 + 127) / 255;
@@ -399,7 +426,7 @@ TelemetryResult ReadTelemetry(const Candidate& device, State& state) {
 
     // Charging status has its own command, the flag lives in the second argument.
     memset(args, 0, sizeof(args));
-    if (QueryRazer(hid, device.featureLength, 0x07, 0x84, args, 2, reply, L"charging", false)) {
+    if (QueryRazer(hid, device, 0x07, 0x84, args, 2, reply, L"charging", false)) {
         state.isCharging = reply.args[1] != 0;
     }
 
@@ -408,7 +435,7 @@ TelemetryResult ReadTelemetry(const Candidate& device, State& state) {
     for (BYTE variable : dpiVariables) {
         memset(args, 0, sizeof(args));
         args[0] = variable;
-        if (!QueryRazer(hid, device.featureLength, 0x04, 0x85, args, 7, reply, L"dpi", false)) continue;
+        if (!QueryRazer(hid, device, 0x04, 0x85, args, 7, reply, L"dpi", false)) continue;
 
         int x = (reply.args[1] << 8) | (reply.args[2] & 0xFF);
         int y = (reply.args[3] << 8) | (reply.args[4] & 0xFF);
@@ -428,7 +455,7 @@ TelemetryResult ReadTelemetry(const Candidate& device, State& state) {
 
     // Polling rate: classic command first, high polling rate command as fallback.
     memset(args, 0, sizeof(args));
-    if (QueryRazer(hid, device.featureLength, 0x00, 0x85, args, 1, reply, L"polling", false)) {
+    if (QueryRazer(hid, device, 0x00, 0x85, args, 1, reply, L"polling", false)) {
         switch (reply.args[0]) {
             case 0x01: state.pollingHz = 1000; break;
             case 0x02: state.pollingHz = 500; break;
@@ -442,7 +469,7 @@ TelemetryResult ReadTelemetry(const Candidate& device, State& state) {
 
     if (!state.hasPollingRate) {
         memset(args, 0, sizeof(args));
-        if (QueryRazer(hid, device.featureLength, 0x00, 0xC0, args, 1, reply, L"polling8k", false)) {
+        if (QueryRazer(hid, device, 0x00, 0xC0, args, 1, reply, L"polling8k", false)) {
             switch (reply.args[1]) {
                 case 0x01: state.pollingHz = 8000; break;
                 case 0x02: state.pollingHz = 4000; break;
@@ -492,7 +519,7 @@ void ClearTelemetry(State& state) {
 int ChooseCandidate(const std::vector<Candidate>& candidates) {
     int bestKnown = -1, bestKnownScore = -1;
     int bestAny = -1, bestAnyScore = -1;
-    const int limit = std::min<int>((int)candidates.size(), MAX_PROBED_CANDIDATES);
+    const int limit = (int)candidates.size();
 
     for (int i = 0; i < limit; ++i) {
         HANDLE hid = OpenControlInterface(candidates[i].path, nullptr);
@@ -501,11 +528,11 @@ int ChooseCandidate(const std::vector<Candidate>& candidates) {
         int score = 0;
         BYTE args[80] = {};
         Reply reply;
-        if (QueryRazer(hid, candidates[i].featureLength, 0x04, 0x85, args, 7, reply, L"probe-dpi")) ++score;
+        if (QueryRazer(hid, candidates[i], 0x04, 0x85, args, 7, reply, L"probe-dpi")) ++score;
         memset(args, 0, sizeof(args));
-        if (QueryRazer(hid, candidates[i].featureLength, 0x00, 0x85, args, 1, reply, L"probe-polling")) ++score;
+        if (QueryRazer(hid, candidates[i], 0x00, 0x85, args, 1, reply, L"probe-polling")) ++score;
         memset(args, 0, sizeof(args));
-        if (QueryRazer(hid, candidates[i].featureLength, 0x07, 0x80, args, 2, reply, L"probe-battery")) ++score;
+        if (QueryRazer(hid, candidates[i], 0x07, 0x80, args, 2, reply, L"probe-battery")) ++score;
         CloseHandle(hid);
 
         if (candidates[i].knownModel && score > bestKnownScore) { bestKnown = i; bestKnownScore = score; }
