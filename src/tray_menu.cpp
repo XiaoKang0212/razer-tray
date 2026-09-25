@@ -101,7 +101,10 @@ static void ApplyModernWindowStyle(HWND hWnd, bool isDark, int w = 0, int h = 0)
 
     if (fnSetWindowCompositionAttribute) {
         ACCENT_POLICY policy = {};
-        policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
+        // Acrylic can cover the redirected GDI surface on some Windows
+        // light-theme configurations. Use the normal opaque window surface in
+        // light mode so all menu labels remain visible; keep dark acrylic.
+        policy.AccentState = isDark ? ACCENT_ENABLE_ACRYLICBLURBEHIND : ACCENT_DISABLED;
         policy.AccentFlags = 0; // No DWM system rectangular border (eliminated white streaks)
         policy.GradientColor = isDark ? 0xCC1A1B20 : 0xD8F8F9FA; // AABBGGRR
         WINDOWCOMPOSITIONATTRIBDATA data = { 19, &policy, sizeof(policy) };

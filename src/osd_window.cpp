@@ -19,11 +19,11 @@ static const UINT_PTR TIMER_OSD_HIDE = 101;
 static const UINT_PTR TIMER_OSD_FADE = 102;
 static const BYTE OSD_ALPHA_MAX = 240;
 
-// The card uses the same acrylic recipe as the tray menu: the DWM blur behind
-// window plus the menu colour palette, so both surfaces look identical.
+// Dark-mode cards use the same DWM acrylic backdrop as the tray menu. Light
+// mode uses an opaque GDI surface to keep its text visible on affected systems.
 enum ACCENT_STATE {
-    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4,
-    ACCENT_INVALID_STATE = 5
+    ACCENT_DISABLED = 0,
+    ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
 };
 
 struct ACCENT_POLICY {
@@ -134,7 +134,11 @@ static void ApplyCardStyle(HWND hWnd, bool isDark) {
             (pfnSetWindowCompositionAttribute)GetProcAddress(hUser, "SetWindowCompositionAttribute");
         if (fnSetWindowCompositionAttribute) {
             ACCENT_POLICY policy = {};
-            policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
+            // Acrylic can be composed over the redirected GDI surface on some
+            // Windows light-theme configurations, leaving the card visible but
+            // hiding its text. Keep the light card opaque so its GDI content is
+            // always presented; preserve acrylic for dark mode.
+            policy.AccentState = isDark ? ACCENT_ENABLE_ACRYLICBLURBEHIND : ACCENT_DISABLED;
             policy.AccentFlags = 0;
             policy.GradientColor = isDark ? 0xCC1A1B20 : 0xD8F8F9FA; // AABBGGRR
             WINDOWCOMPOSITIONATTRIBDATA data = { 19, &policy, sizeof(policy) };
