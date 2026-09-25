@@ -122,7 +122,7 @@ static void ApplyModernWindowStyle(HWND hWnd, bool isDark, int w = 0, int h = 0)
         ACCENT_POLICY policy = {};
         policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
         policy.AccentFlags = 0; // No DWM system rectangular border (eliminated white streaks)
-        policy.GradientColor = isDark ? 0xCC1A1B20 : 0xD8F8F9FA; // AABBGGRR
+        policy.GradientColor = Theme::AcrylicGradientColor(isDark);
         WINDOWCOMPOSITIONATTRIBDATA data = { 19, &policy, sizeof(policy) };
         g_acrylicEnabled = fnSetWindowCompositionAttribute(hWnd, &data) != FALSE;
     } else {
@@ -443,13 +443,13 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             RECT rc;
             GetClientRect(hWnd, &rc);
 
-            COLORREF bgCol = g_curDark ? RGB(24, 26, 32) : RGB(248, 248, 252);
-            COLORREF borderCol = g_curDark ? RGB(50, 54, 65) : RGB(218, 222, 230);
-            COLORREF hoverCol = g_curDark ? RGB(52, 58, 72) : RGB(228, 232, 242);
-            COLORREF textCol = g_curDark ? RGB(235, 240, 248) : RGB(30, 35, 45);
-            COLORREF checkCol = g_curDark ? RGB(68, 214, 44) : RGB(38, 150, 34);
-            COLORREF mutedCol = g_curDark ? RGB(140, 150, 165) : RGB(120, 130, 145);
-            COLORREF trackBgCol = g_curDark ? RGB(45, 50, 60) : RGB(215, 220, 230);
+            COLORREF bgCol = Theme::AcrylicBaseColor(g_curDark);
+            COLORREF borderCol = g_curDark ? RGB(69, 79, 96) : RGB(202, 212, 228);
+            COLORREF hoverCol = g_curDark ? RGB(48, 58, 74) : RGB(229, 237, 249);
+            COLORREF textCol = g_curDark ? RGB(241, 244, 250) : RGB(24, 30, 40);
+            COLORREF checkCol = g_curDark ? RGB(101, 222, 111) : RGB(20, 132, 67);
+            COLORREF mutedCol = g_curDark ? RGB(177, 188, 205) : RGB(77, 89, 106);
+            COLORREF trackBgCol = g_curDark ? RGB(45, 53, 66) : RGB(212, 222, 236);
 
             AcrylicSurface::Buffer surface;
             if (!AcrylicSurface::Create(hdc, rc.right, rc.bottom, surface)) {
@@ -822,14 +822,14 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
             RECT rc;
             GetClientRect(hWnd, &rc);
 
-            COLORREF bgCol = g_curDark ? RGB(24, 26, 32) : RGB(248, 248, 252);
-            COLORREF borderCol = g_curDark ? RGB(50, 54, 65) : RGB(218, 222, 230);
-            COLORREF hoverCol = g_curDark ? RGB(52, 58, 72) : RGB(228, 232, 242);
-            COLORREF textCol = g_curDark ? RGB(235, 240, 248) : RGB(30, 35, 45);
-            COLORREF mutedCol = g_curDark ? RGB(155, 165, 180) : RGB(100, 110, 125);
-            COLORREF greenCol = g_curDark ? RGB(34, 197, 94) : RGB(22, 163, 74);
-            COLORREF sepCol = g_curDark ? RGB(40, 44, 54) : RGB(225, 228, 236);
-            COLORREF checkCol = g_curDark ? RGB(68, 214, 44) : RGB(38, 150, 34);
+            COLORREF bgCol = Theme::AcrylicBaseColor(g_curDark);
+            COLORREF borderCol = g_curDark ? RGB(69, 79, 96) : RGB(202, 212, 228);
+            COLORREF hoverCol = g_curDark ? RGB(48, 58, 74) : RGB(229, 237, 249);
+            COLORREF textCol = g_curDark ? RGB(241, 244, 250) : RGB(24, 30, 40);
+            COLORREF mutedCol = g_curDark ? RGB(177, 188, 205) : RGB(77, 89, 106);
+            COLORREF greenCol = g_curDark ? RGB(101, 222, 111) : RGB(20, 132, 67);
+            COLORREF sepCol = g_curDark ? RGB(53, 62, 77) : RGB(212, 222, 236);
+            COLORREF checkCol = g_curDark ? RGB(101, 222, 111) : RGB(20, 132, 67);
 
             AcrylicSurface::Buffer surface;
             if (!AcrylicSurface::Create(hdc, rc.right, rc.bottom, surface)) {

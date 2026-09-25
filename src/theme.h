@@ -73,4 +73,18 @@ inline bool IsDarkMode() {
     return IsSystemDarkMode();
 }
 
+inline COLORREF AcrylicBaseColor(bool isDark) {
+    return isDark ? RGB(24, 28, 36) : RGB(248, 250, 253);
+}
+
+inline DWORD AcrylicGradientColor(bool isDark) {
+    // SetWindowCompositionAttribute expects AABBGGRR (opacity, blue, green, red).
+    const COLORREF color = AcrylicBaseColor(isDark);
+    const DWORD opacity = 0xB8; // Let more of the blurred desktop show through.
+    return (opacity << 24) |
+           (static_cast<DWORD>(GetBValue(color)) << 16) |
+           (static_cast<DWORD>(GetGValue(color)) << 8) |
+           static_cast<DWORD>(GetRValue(color));
+}
+
 } // namespace Theme

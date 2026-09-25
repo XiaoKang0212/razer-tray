@@ -137,7 +137,7 @@ static void ApplyCardStyle(HWND hWnd, bool isDark) {
             ACCENT_POLICY policy = {};
             policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
             policy.AccentFlags = 0;
-            policy.GradientColor = isDark ? 0xCC1A1B20 : 0xD8F8F9FA; // AABBGGRR
+            policy.GradientColor = Theme::AcrylicGradientColor(isDark);
             WINDOWCOMPOSITIONATTRIBDATA data = { 19, &policy, sizeof(policy) };
             g_acrylicEnabled = fnSetWindowCompositionAttribute(hWnd, &data) != FALSE;
         } else {
@@ -171,12 +171,12 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             auto S = [dpi](int v) { return ScaleDpi(v, dpi); };
             const bool darkMode = Theme::IsDarkMode();
 
-            const COLORREF bgCol = darkMode ? RGB(24, 26, 32) : RGB(248, 248, 252);
+            const COLORREF bgCol = Theme::AcrylicBaseColor(darkMode);
             // A clearly visible 1 px frame with antialiased corners.
-            const COLORREF borderCol = darkMode ? RGB(104, 112, 130) : RGB(186, 192, 204);
-            const COLORREF titleCol = darkMode ? RGB(235, 240, 248) : RGB(30, 35, 45);
-            const COLORREF subCol = darkMode ? RGB(180, 192, 210) : RGB(90, 100, 115);
-            const COLORREF accentCol = darkMode ? RGB(68, 214, 44) : RGB(22, 163, 74);
+            const COLORREF borderCol = darkMode ? RGB(88, 101, 121) : RGB(173, 185, 202);
+            const COLORREF titleCol = darkMode ? RGB(241, 244, 250) : RGB(24, 30, 40);
+            const COLORREF subCol = darkMode ? RGB(194, 204, 220) : RGB(66, 77, 94);
+            const COLORREF accentCol = darkMode ? RGB(101, 222, 111) : RGB(20, 132, 67);
 
             AcrylicSurface::Buffer surface;
             if (!AcrylicSurface::Create(hdc, rc.right, rc.bottom, surface)) {
