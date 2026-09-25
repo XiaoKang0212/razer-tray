@@ -36,7 +36,7 @@ static void RequestStatusOsd() {
 static void RefreshTrayUI(const Device::State& state) {
     if (!g_hMainWnd) return;
 
-    const bool isDark = Theme::IsSystemDarkMode();
+    const bool isDark = Theme::IsDarkMode();
 
     int iconSize = GetSystemMetrics(SM_CXSMICON);
     if (iconSize <= 0) iconSize = 16;

@@ -24,9 +24,27 @@ static bool g_bModalLoop = false;
 static int g_curDpi = 96;
 static bool g_curDark = false;
 static bool g_acrylicEnabled = false;
-static int g_activeSubId = 0; // 0: None, 1: Polling Hz, 2: Sleep Slider
+static int g_activeSubId = 0; // 0: None, 1: Polling Hz, 2: Sleep Slider, 3: Battery, 4: Theme
 static int g_mainHover = -1;
 static int g_subHover = -1;
+
+static const Theme::Mode THEME_MODES[] = {
+    Theme::Mode::Light,
+    Theme::Mode::Dark,
+    Theme::Mode::FollowSystem
+};
+static const WCHAR* THEME_LABELS[] = { L"浅色", L"深色", L"跟随系统" };
+
+static int GetThemeModeIndex(Theme::Mode mode) {
+    for (int i = 0; i < (int)ARRAYSIZE(THEME_MODES); ++i) {
+        if (THEME_MODES[i] == mode) return i;
+    }
+    return 2;
+}
+
+static const WCHAR* GetThemeModeLabel(Theme::Mode mode) {
+    return THEME_LABELS[GetThemeModeIndex(mode)];
+}
 
 // Sleep slider state
 static bool g_isDraggingSlider = false;
@@ -333,7 +351,7 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                 return 0;
             }
 
-            if (g_activeSubId == 1 || g_activeSubId == 3) { // List submenus
+            if (g_activeSubId == 1 || g_activeSubId == 3 || g_activeSubId == 4) { // List submenus
                 int count = (g_activeSubId == 1) ? 7 : 3;
                 int itemH = S(28);
                 int y = S(8);
@@ -381,6 +399,20 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                 DismissAllMenus();
                 Device::RequestRefresh();
                 Osd::Show(labels[chosen], L"托盘图标已切换为所选显示方式", L"右键菜单可随时再次切换");
+                return 0;
+            }
+
+            if (g_activeSubId == 4 && g_subHover >= 0) {
+                const int chosen = std::clamp(g_subHover, 0, 2);
+                if (!Theme::SetMode(THEME_MODES[chosen])) {
+                    Osd::Show(L"主题设置失败", L"无法保存主题选项", L"请稍后重试");
+                    DismissAllMenus();
+                    return 0;
+                }
+
+                if (g_hParentAppWnd) PostMessageW(g_hParentAppWnd, WM_SETTINGCHANGE, 0, 0);
+                DismissAllMenus();
+                Osd::Show(L"主题显示", THEME_LABELS[chosen], L"设置已保存");
                 return 0;
             }
 
@@ -486,9 +518,12 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                     }
                     y += itemH;
                 }
-            } else if (g_activeSubId == 3) { // Battery indicator style
-                const WCHAR* labels[] = { L"环形电量", L"电池图标", L"数字显示" };
-                const int current = GetBatteryDisplayStyle();
+            } else if (g_activeSubId == 3 || g_activeSubId == 4) { // Battery style / Theme
+                static const WCHAR* batteryLabels[] = { L"环形电量", L"电池图标", L"数字显示" };
+                const bool isThemeMenu = (g_activeSubId == 4);
+                const int current = isThemeMenu
+                    ? GetThemeModeIndex(Theme::GetMode())
+                    : GetBatteryDisplayStyle();
 
                 int itemH = S(28);
                 int y = S(8);
@@ -508,7 +543,8 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
 
                     SetTextColor(memDC, textCol);
                     RECT rText = { S(14), y, rc.right - S(32), y + itemH };
-                    DrawTextW(memDC, labels[i], -1, &rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    const WCHAR* label = isThemeMenu ? THEME_LABELS[i] : batteryLabels[i];
+                    DrawTextW(memDC, label, -1, &rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
                     if (i == current) {
                         SetTextColor(memDC, checkCol);
@@ -632,8 +668,8 @@ static void ShowSubMenuWindow(int subType, RECT rItemScreen) {
         s_subRegistered = true;
     }
 
-    int subW = (subType == 1) ? S(140) : ((subType == 3) ? S(168) : S(260));
-    int subH = (subType == 1) ? S(212) : ((subType == 3) ? S(100) : S(138));
+    int subW = (subType == 1) ? S(140) : ((subType == 3 || subType == 4) ? S(168) : S(260));
+    int subH = (subType == 1) ? S(212) : ((subType == 3 || subType == 4) ? S(100) : S(138));
 
     HMONITOR hMon = MonitorFromPoint({ rItemScreen.left, rItemScreen.top }, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi = { sizeof(mi) };
@@ -907,7 +943,7 @@ void ShowMenu(HWND hWndOwner) {
     if (g_bModalLoop) return;
     Device::RefreshPollingRate();
     g_hParentAppWnd = hWndOwner;
-    g_curDark = Theme::IsSystemDarkMode();
+    g_curDark = Theme::IsDarkMode();
 
     POINT pt;
     GetCursorPos(&pt);
@@ -981,6 +1017,13 @@ void ShowMenu(HWND hWndOwner) {
     itemBatteryStyle.submenuType = 3;
     StringCchPrintfW(itemBatteryStyle.value, 32, L"%s ›", styleNames[GetBatteryDisplayStyle()]);
     g_mainItems.push_back(itemBatteryStyle);
+
+    MenuItemData itemTheme = { 0 };
+    itemTheme.label = L"主题显示";
+    itemTheme.isInteractive = true;
+    itemTheme.submenuType = 4;
+    StringCchPrintfW(itemTheme.value, 32, L"%s ›", GetThemeModeLabel(Theme::GetMode()));
+    g_mainItems.push_back(itemTheme);
 
     MenuItemData sep1 = { 0 };
     sep1.isSeparator = true;

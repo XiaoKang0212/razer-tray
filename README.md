@@ -31,6 +31,7 @@
   Feature 报文的鼠标接口），无需选择设备。
 - **三种电量显示**：右键菜单「电量显示」可在 **环形电量 / 电池图标 / 数字显示** 之间切换，
   选择结果写入注册表，重启后保持。
+- **主题显示**：右键菜单可选 **浅色 / 深色 / 跟随系统**，选择会保存并同时应用到菜单、OSD 和托盘图标。
 - **环形样式**：中心为项目自制的简约鼠标标志 + 外围电量环。整圈为绿色底环，较亮的弧段表示已用电量
   （<30% 转橙色、<15% 转红色），中心保持透明、不填充底色；未连接时整体变暗。
 - **连接检测**：区分「接收器已插入」与「鼠标已开机」。鼠标电源关闭时显示
@@ -41,7 +42,7 @@
   浅色与深色模式均使用亚克力背景；文字和控件通过独立的 Alpha 通道绘制，确保浅色背景下清晰可见，
   并保留抗锯齿圆角与边框。
 - **右键菜单**：显示型号与连接方式，以及电池电量 / 灵敏度 · DPI / 轮询率 / 电量显示 /
-  开机自启动 / 退出程序。
+  主题显示 / 开机自启动 / 退出程序。
 - **诊断日志**：每次刷新写一行精简记录到 `%LOCALAPPDATA%\RazerTray\telemetry.log`，
   读取失败时便于排查（菜单中不提供入口）。
 
@@ -87,7 +88,8 @@ OSD 状态提示：
 识别方式为 **USB Vendor ID `1532` + 控制接口探测**：程序遍历 Razer HID 接口，
 选择承载 90/91 字节 Feature 报文的接口（不同机型可能是 `0xFF00` 厂商接口，
 也可能是 Windows 只允许「仅写」打开的鼠标接口）；DeathAdder V3 Pro 的已知控制接口即使未在
-HID 描述符中声明 Feature 报文，也会按其鼠标集合进行探测，并通过实际查询确认设备是否响应。
+HID 描述符中声明 Feature 报文，也会按其鼠标集合进行探测。DeathAdder V3 Pro 有线连接已实机确认；
+无线版目前没有设备可供实机验证和进一步适配，暂不保证可用。
 
 ### Basilisk
 
@@ -133,12 +135,12 @@ HID 描述符中声明 Feature 报文，也会按其鼠标集合进行探测，�
 | Razer DeathAdder V2 Mini | 0x008C | 有线 | 待验证 |
 | Razer DeathAdder V2 X HyperSpeed | 0x009C | 无线 | 待验证 |
 | Razer DeathAdder V3 | 0x00B2 | 有线 | 待验证 |
-| Razer DeathAdder V3 Pro (Wired) | 0x00B6 | 有线 | 待验证 |
-| Razer DeathAdder V3 Pro (Wireless) | 0x00B7 | 无线 | 待验证 |
+| Razer DeathAdder V3 Pro (Wired) | 0x00B6 | 有线 | ✅ 实机确认 |
+| Razer DeathAdder V3 Pro (Wireless) | 0x00B7 | 无线 | 暂未验证（暂无设备可测试/适配） |
 | Razer DeathAdder V4 Pro (Wired) | 0x00BE | 有线 | 待验证 |
 | Razer DeathAdder V4 Pro (Wireless) | 0x00BF | 无线 | 待验证 |
 | Razer DeathAdder V3 Pro (Wired, ALT) | 0x00C2 | 有线 | 待验证 |
-| Razer DeathAdder V3 Pro (Wireless, ALT) | 0x00C3 | 无线 | 待验证 |
+| Razer DeathAdder V3 Pro (Wireless, ALT) | 0x00C3 | 无线 | 暂未验证（暂无设备可测试/适配） |
 | Razer DeathAdder V3 HyperSpeed (Wired) | 0x00C4 | 有线 | 待验证 |
 | Razer DeathAdder V3 HyperSpeed (Wireless) | 0x00C5 | 无线 | 待验证 |
 
@@ -151,10 +153,10 @@ HID 描述符中声明 Feature 报文，也会按其鼠标集合进行探测，�
   固件不上报充电状态，属正常现象。
 - **DPI**：命令 `0x04/0x85`（7 字节参数），优先读取硬件当前值，失败时回退到软件档位值。
 - **轮询率**：命令 `0x00/0x85`；8000 Hz 级设备回退到 `0x00/0xC0`。
-- **验证状态**：上表「验证状态」列标出在真机上实际测试过的机型。当前实测通过的是
-  Razer Basilisk V3 X HyperSpeed（`0x00B9`）：电量、DPI、轮询率均读取正常
-  （测试时为 60% / 1200 DPI / 1000 Hz）。其余机型依照公开协议适配，标记为「待验证」，
-  如果你的机型可用或某项读数缺失，欢迎反馈。
+- **验证状态**：上表「验证状态」列标出在真机上实际测试过的机型。Razer Basilisk V3 X HyperSpeed
+  （`0x00B9`）的电量、DPI、轮询率均读取正常（测试时为 60% / 1200 DPI / 1000 Hz）；
+  DeathAdder V3 Pro 有线连接已确认。DeathAdder V3 Pro 无线版因目前没有设备，尚未实机验证或完成进一步适配；
+  其余标记为「待验证」的型号依照公开协议适配，欢迎反馈实际测试结果。
 
 ## 已知限制
 
