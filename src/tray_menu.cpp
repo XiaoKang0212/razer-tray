@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "acrylic_surface.h"
 #include "theme.h"
 
 namespace Tray {
@@ -22,6 +23,7 @@ static bool g_bModalLoop = false;
 
 static int g_curDpi = 96;
 static bool g_curDark = false;
+static bool g_acrylicEnabled = false;
 static int g_activeSubId = 0; // 0: None, 1: Polling Hz, 2: Sleep Slider
 static int g_mainHover = -1;
 static int g_subHover = -1;
@@ -37,7 +39,6 @@ static inline int S(int val) {
 
 // Windows 11 / 10 Acrylic & Theme Hooks
 typedef enum _ACCENT_STATE {
-    ACCENT_DISABLED = 0,
     ACCENT_ENABLE_GRADIENT = 1,
     ACCENT_ENABLE_TRANSPARENTGRADIENT = 2,
     ACCENT_ENABLE_BLURBEHIND = 3,
@@ -101,14 +102,13 @@ static void ApplyModernWindowStyle(HWND hWnd, bool isDark, int w = 0, int h = 0)
 
     if (fnSetWindowCompositionAttribute) {
         ACCENT_POLICY policy = {};
-        // Acrylic can cover the redirected GDI surface on some Windows
-        // light-theme configurations. Use the normal opaque window surface in
-        // light mode so all menu labels remain visible; keep dark acrylic.
-        policy.AccentState = isDark ? ACCENT_ENABLE_ACRYLICBLURBEHIND : ACCENT_DISABLED;
+        policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
         policy.AccentFlags = 0; // No DWM system rectangular border (eliminated white streaks)
         policy.GradientColor = isDark ? 0xCC1A1B20 : 0xD8F8F9FA; // AABBGGRR
         WINDOWCOMPOSITIONATTRIBDATA data = { 19, &policy, sizeof(policy) };
-        fnSetWindowCompositionAttribute(hWnd, &data);
+        g_acrylicEnabled = fnSetWindowCompositionAttribute(hWnd, &data) != FALSE;
+    } else {
+        g_acrylicEnabled = false;
     }
 }
 
@@ -411,10 +411,6 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             RECT rc;
             GetClientRect(hWnd, &rc);
 
-            HDC memDC = CreateCompatibleDC(hdc);
-            HBITMAP hbm = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
-            HBITMAP oldBm = (HBITMAP)SelectObject(memDC, hbm);
-
             COLORREF bgCol = g_curDark ? RGB(24, 26, 32) : RGB(248, 248, 252);
             COLORREF borderCol = g_curDark ? RGB(50, 54, 65) : RGB(218, 222, 230);
             COLORREF hoverCol = g_curDark ? RGB(52, 58, 72) : RGB(228, 232, 242);
@@ -422,6 +418,16 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             COLORREF checkCol = g_curDark ? RGB(68, 214, 44) : RGB(38, 150, 34);
             COLORREF mutedCol = g_curDark ? RGB(140, 150, 165) : RGB(120, 130, 145);
             COLORREF trackBgCol = g_curDark ? RGB(45, 50, 60) : RGB(215, 220, 230);
+
+            AcrylicSurface::Buffer surface;
+            if (!AcrylicSurface::Create(hdc, rc.right, rc.bottom, surface)) {
+                HBRUSH fallback = CreateSolidBrush(bgCol);
+                FillRect(hdc, &rc, fallback);
+                DeleteObject(fallback);
+                EndPaint(hWnd, &ps);
+                return 0;
+            }
+            HDC memDC = surface.dc;
 
             HBRUSH bgBrush = CreateSolidBrush(bgCol);
             FillRect(memDC, &rc, bgBrush);
@@ -436,13 +442,13 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
 
             HFONT hFontNormal = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                                            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
             HFONT hFontBold = CreateFontW(-S(13), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                          CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                                          ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
             HFONT hFontSmall = CreateFontW(-S(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                           CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                                           ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
 
             SetBkMode(memDC, TRANSPARENT);
             HGDIOBJ oldFont = SelectObject(memDC, hFontNormal);
@@ -595,10 +601,8 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             DeleteObject(hFontBold);
             DeleteObject(hFontSmall);
 
-            BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
-            SelectObject(memDC, oldBm);
-            DeleteObject(hbm);
-            DeleteDC(memDC);
+            AcrylicSurface::Present(hdc, surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::Destroy(surface);
 
             EndPaint(hWnd, &ps);
             return 0;
@@ -782,10 +786,6 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
             RECT rc;
             GetClientRect(hWnd, &rc);
 
-            HDC memDC = CreateCompatibleDC(hdc);
-            HBITMAP hbm = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
-            HBITMAP oldBm = (HBITMAP)SelectObject(memDC, hbm);
-
             COLORREF bgCol = g_curDark ? RGB(24, 26, 32) : RGB(248, 248, 252);
             COLORREF borderCol = g_curDark ? RGB(50, 54, 65) : RGB(218, 222, 230);
             COLORREF hoverCol = g_curDark ? RGB(52, 58, 72) : RGB(228, 232, 242);
@@ -794,6 +794,16 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
             COLORREF greenCol = g_curDark ? RGB(34, 197, 94) : RGB(22, 163, 74);
             COLORREF sepCol = g_curDark ? RGB(40, 44, 54) : RGB(225, 228, 236);
             COLORREF checkCol = g_curDark ? RGB(68, 214, 44) : RGB(38, 150, 34);
+
+            AcrylicSurface::Buffer surface;
+            if (!AcrylicSurface::Create(hdc, rc.right, rc.bottom, surface)) {
+                HBRUSH fallback = CreateSolidBrush(bgCol);
+                FillRect(hdc, &rc, fallback);
+                DeleteObject(fallback);
+                EndPaint(hWnd, &ps);
+                return 0;
+            }
+            HDC memDC = surface.dc;
 
             HBRUSH bgBrush = CreateSolidBrush(bgCol);
             FillRect(memDC, &rc, bgBrush);
@@ -808,13 +818,13 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
 
             HFONT hFontNormal = CreateFontW(-S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                                            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
             HFONT hFontBold = CreateFontW(-S(14), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                                           DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                          CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                                          ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
             HFONT hFontSub = CreateFontW(-S(11), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                          DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                         CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                                         ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
 
             SetBkMode(memDC, TRANSPARENT);
             HGDIOBJ oldFont = SelectObject(memDC, hFontNormal);
@@ -880,10 +890,8 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
             DeleteObject(hFontBold);
             DeleteObject(hFontSub);
 
-            BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
-            SelectObject(memDC, oldBm);
-            DeleteObject(hbm);
-            DeleteDC(memDC);
+            AcrylicSurface::Present(hdc, surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::Destroy(surface);
 
             EndPaint(hWnd, &ps);
             return 0;

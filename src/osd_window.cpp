@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include "acrylic_surface.h"
 #include "theme.h"
 
 namespace Osd {
@@ -14,15 +15,15 @@ static WCHAR g_textLine1[64] = {0};
 static WCHAR g_textLine2[64] = {0};
 static WCHAR g_textLine3[64] = {0};
 static BYTE g_osdAlpha = 0;
+static bool g_acrylicEnabled = false;
 
 static const UINT_PTR TIMER_OSD_HIDE = 101;
 static const UINT_PTR TIMER_OSD_FADE = 102;
 static const BYTE OSD_ALPHA_MAX = 240;
 
-// Dark-mode cards use the same DWM acrylic backdrop as the tray menu. Light
-// mode uses an opaque GDI surface to keep its text visible on affected systems.
+// Both themes use DWM acrylic. The off-screen GDI surface explicitly restores
+// alpha for its text and controls so the backdrop never erases dark glyphs.
 enum ACCENT_STATE {
-    ACCENT_DISABLED = 0,
     ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
 };
 
@@ -134,16 +135,16 @@ static void ApplyCardStyle(HWND hWnd, bool isDark) {
             (pfnSetWindowCompositionAttribute)GetProcAddress(hUser, "SetWindowCompositionAttribute");
         if (fnSetWindowCompositionAttribute) {
             ACCENT_POLICY policy = {};
-            // Acrylic can be composed over the redirected GDI surface on some
-            // Windows light-theme configurations, leaving the card visible but
-            // hiding its text. Keep the light card opaque so its GDI content is
-            // always presented; preserve acrylic for dark mode.
-            policy.AccentState = isDark ? ACCENT_ENABLE_ACRYLICBLURBEHIND : ACCENT_DISABLED;
+            policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND;
             policy.AccentFlags = 0;
             policy.GradientColor = isDark ? 0xCC1A1B20 : 0xD8F8F9FA; // AABBGGRR
             WINDOWCOMPOSITIONATTRIBDATA data = { 19, &policy, sizeof(policy) };
-            fnSetWindowCompositionAttribute(hWnd, &data);
+            g_acrylicEnabled = fnSetWindowCompositionAttribute(hWnd, &data) != FALSE;
+        } else {
+            g_acrylicEnabled = false;
         }
+    } else {
+        g_acrylicEnabled = false;
     }
 
     BOOL dark = isDark ? TRUE : FALSE;
@@ -170,16 +171,22 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             auto S = [dpi](int v) { return ScaleDpi(v, dpi); };
             const bool darkMode = Theme::IsSystemDarkMode();
 
-            HDC memDC = CreateCompatibleDC(hdc);
-            HBITMAP memBmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
-            HBITMAP oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
-
             const COLORREF bgCol = darkMode ? RGB(24, 26, 32) : RGB(248, 248, 252);
             // A clearly visible 1 px frame with antialiased corners.
             const COLORREF borderCol = darkMode ? RGB(104, 112, 130) : RGB(186, 192, 204);
             const COLORREF titleCol = darkMode ? RGB(235, 240, 248) : RGB(30, 35, 45);
             const COLORREF subCol = darkMode ? RGB(180, 192, 210) : RGB(90, 100, 115);
             const COLORREF accentCol = darkMode ? RGB(68, 214, 44) : RGB(22, 163, 74);
+
+            AcrylicSurface::Buffer surface;
+            if (!AcrylicSurface::Create(hdc, rc.right, rc.bottom, surface)) {
+                HBRUSH fallback = CreateSolidBrush(bgCol);
+                FillRect(hdc, &rc, fallback);
+                DeleteObject(fallback);
+                EndPaint(hWnd, &ps);
+                return 0;
+            }
+            HDC memDC = surface.dc;
 
             HBRUSH bgBrush = CreateSolidBrush(bgCol);
             FillRect(memDC, &rc, bgBrush);
@@ -199,7 +206,7 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             HFONT hFontBig = CreateFontW(
                 -S(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
+                ANTIALIASED_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
             HGDIOBJ oldFont = SelectObject(memDC, hFontBig);
             SetTextColor(memDC, titleCol);
 
@@ -211,7 +218,7 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             HFONT hFontMid = CreateFontW(
                 -S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
+                ANTIALIASED_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
             SelectObject(memDC, hFontMid);
             SetTextColor(memDC, subCol);
 
@@ -225,7 +232,7 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
                 hFontSub = CreateFontW(
                     -S(12), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                    CLEARTYPE_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
+                    ANTIALIASED_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
                 SelectObject(memDC, hFontSub);
                 SetTextColor(memDC, accentCol);
 
@@ -235,12 +242,9 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
                 DrawTextW(memDC, g_textLine3, -1, &rcBot, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
 
-            BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
-
             SelectObject(memDC, oldFont);
-            SelectObject(memDC, oldBmp);
-            DeleteObject(memBmp);
-            DeleteDC(memDC);
+            AcrylicSurface::Present(hdc, surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::Destroy(surface);
             DeleteObject(hFontBig);
             DeleteObject(hFontMid);
             if (hFontSub) DeleteObject(hFontSub);
