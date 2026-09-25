@@ -402,7 +402,7 @@ void ShowDeviceStatus(const Device::State& state) {
     else StringCchPrintfW(dpi, ARRAYSIZE(dpi), L"DPI %d", state.dpiX);
     if (!state.hasPollingRate) StringCchCopyW(polling, ARRAYSIZE(polling), L"轮询率 --");
     else StringCchPrintfW(polling, ARRAYSIZE(polling), L"轮询率 %d Hz", state.pollingHz);
-    StringCchPrintfW(l3, ARRAYSIZE(l3), L"%s   ·   %s   ·   %s", battery, dpi, polling);
+    StringCchPrintfW(l3, ARRAYSIZE(l3), L"%s   |   %s   |   %s", battery, dpi, polling);
     Show(l1, l2, l3);
 }
 
