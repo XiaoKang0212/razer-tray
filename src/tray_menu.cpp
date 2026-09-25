@@ -482,7 +482,7 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
 
-            SetBkMode(memDC, TRANSPARENT);
+            AcrylicSurface::TextCommands textCommands;
             HGDIOBJ oldFont = SelectObject(memDC, hFontNormal);
 
             if (g_activeSubId == 1) { // Polling Rate list
@@ -507,14 +507,14 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                         DeleteObject(hH);
                     }
 
-                    SetTextColor(memDC, textCol);
                     RECT rText = { S(14), y, rc.right - S(32), y + itemH };
-                    DrawTextW(memDC, labels[i], -1, &rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    AcrylicSurface::QueueText(textCommands, hFontNormal, textCol, labels[i],
+                                              rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
                     if (hzVals[i] == currentHz) {
-                        SetTextColor(memDC, checkCol);
                         RECT rCheck = { rc.right - S(28), y, rc.right - S(10), y + itemH };
-                        DrawTextW(memDC, L"✓", -1, &rCheck, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        AcrylicSurface::QueueText(textCommands, hFontNormal, checkCol, L"✓",
+                                                  rCheck, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                     }
                     y += itemH;
                 }
@@ -541,31 +541,29 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                         DeleteObject(hH);
                     }
 
-                    SetTextColor(memDC, textCol);
                     RECT rText = { S(14), y, rc.right - S(32), y + itemH };
                     const WCHAR* label = isThemeMenu ? THEME_LABELS[i] : batteryLabels[i];
-                    DrawTextW(memDC, label, -1, &rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    AcrylicSurface::QueueText(textCommands, hFontNormal, textCol, label,
+                                              rText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
                     if (i == current) {
-                        SetTextColor(memDC, checkCol);
                         RECT rCheck = { rc.right - S(28), y, rc.right - S(10), y + itemH };
-                        DrawTextW(memDC, L"✓", -1, &rCheck, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                        AcrylicSurface::QueueText(textCommands, hFontNormal, checkCol, L"✓",
+                                                  rCheck, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                     }
                     y += itemH;
                 }
             } else if (g_activeSubId == 2) { // Modern 2~120 min Interactive Sleep Slider
                 // Header Row: Label + Value
-                SelectObject(memDC, hFontNormal);
-                SetTextColor(memDC, textCol);
                 RECT rHeader = { S(16), S(14), rc.right - S(80), S(38) };
-                DrawTextW(memDC, L"休眠等待时间", -1, &rHeader, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                AcrylicSurface::QueueText(textCommands, hFontNormal, textCol, L"休眠等待时间",
+                                          rHeader, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-                SelectObject(memDC, hFontBold);
-                SetTextColor(memDC, checkCol);
                 WCHAR szVal[32];
                 StringCchPrintfW(szVal, ARRAYSIZE(szVal), L"%d 分钟", g_sliderVal);
                 RECT rVal = { rc.right - S(90), S(14), rc.right - S(16), S(38) };
-                DrawTextW(memDC, szVal, -1, &rVal, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                AcrylicSurface::QueueText(textCommands, hFontBold, checkCol, szVal,
+                                          rVal, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
                 // Slider Track
                 int trackX0 = S(20);
@@ -602,7 +600,6 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                 DeleteObject(hTrackBg);
 
                 // Preset Chips Row
-                SelectObject(memDC, hFontSmall);
                 int count = 5;
                 int chipW = (rc.right - S(40) - (count - 1) * S(6)) / count;
                 int curX = S(20);
@@ -621,10 +618,13 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
                     DeleteObject(hChipPen);
                     DeleteObject(hChipBg);
 
-                    SetTextColor(memDC, isCur ? (g_curDark ? RGB(10, 12, 16) : RGB(255, 255, 255)) : textCol);
+                    COLORREF chipTextCol = isCur
+                        ? (g_curDark ? RGB(10, 12, 16) : RGB(255, 255, 255))
+                        : textCol;
                     WCHAR szChip[16];
                     StringCchPrintfW(szChip, ARRAYSIZE(szChip), L"%d分", PRESET_SLEEP[i]);
-                    DrawTextW(memDC, szChip, -1, &rChip, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    AcrylicSurface::QueueText(textCommands, hFontSmall, chipTextCol, szChip,
+                                              rChip, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
                     curX += chipW + S(6);
                 }
@@ -633,11 +633,13 @@ static LRESULT CALLBACK AcrylicSubWndProc(HWND hWnd, UINT msg, WPARAM wParam, LP
             SelectObject(memDC, oldFont);
             SelectObject(memDC, oldPen);
             SelectObject(memDC, oldBrush);
+
+            AcrylicSurface::Prepare(surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::DrawTextCommands(surface, textCommands);
             DeleteObject(hFontNormal);
             DeleteObject(hFontBold);
             DeleteObject(hFontSmall);
-
-            AcrylicSurface::Present(hdc, surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::PresentPrepared(hdc, surface, bgCol);
             AcrylicSurface::Destroy(surface);
 
             EndPaint(hWnd, &ps);
@@ -862,7 +864,7 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
                                          DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                          ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
 
-            SetBkMode(memDC, TRANSPARENT);
+            AcrylicSurface::TextCommands textCommands;
             HGDIOBJ oldFont = SelectObject(memDC, hFontNormal);
 
             int y = S(8);
@@ -870,17 +872,18 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
                 int h = GetItemH((int)i);
                 if (g_mainItems[i].isHeader) {
                     SelectObject(memDC, hFontBold);
-                    SetTextColor(memDC, textCol);
                     RECT rTitle = { S(16), y + S(4), rc.right - S(16), y + S(26) };
                     // Ellipsis only kicks in if the name is wider than the screen allows.
-                    DrawTextW(memDC, g_mainItems[i].label, -1, &rTitle,
-                              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                    AcrylicSurface::QueueText(textCommands, hFontBold, textCol,
+                                              g_mainItems[i].label, rTitle,
+                                              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-                    SelectObject(memDC, hFontSub);
                     Device::State st = Device::GetCurrentState();
-                    SetTextColor(memDC, st.isConnected ? greenCol : mutedCol);
                     RECT rSub = { S(16), y + S(26), rc.right - S(16), y + S(46) };
-                    DrawTextW(memDC, g_mainItems[i].value, -1, &rSub, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    AcrylicSurface::QueueText(textCommands, hFontSub,
+                                              st.isConnected ? greenCol : mutedCol,
+                                              g_mainItems[i].value, rSub,
+                                              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
                     y += h;
                 } else if (g_mainItems[i].isSeparator) {
                     HPEN pSep = CreatePen(PS_SOLID, 1, sepCol);
@@ -904,16 +907,19 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
                         DeleteObject(hH);
                     }
 
-                    SelectObject(memDC, hFontNormal);
-                    SetTextColor(memDC, g_mainItems[i].isDisabled ? mutedCol : textCol);
+                    COLORREF labelColor = g_mainItems[i].isDisabled ? mutedCol : textCol;
                     RECT rLabel = { S(14), y, rc.right - S(90), y + h };
-                    DrawTextW(memDC, g_mainItems[i].label, -1, &rLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+                    AcrylicSurface::QueueText(textCommands, hFontNormal, labelColor,
+                                              g_mainItems[i].label, rLabel,
+                                              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
                     if (g_mainItems[i].value[0]) {
                         bool isCheck = (wcscmp(g_mainItems[i].value, L"✓ 已开启") == 0);
-                        SetTextColor(memDC, isCheck ? checkCol : mutedCol);
+                        COLORREF valueColor = isCheck ? checkCol : mutedCol;
                         RECT rVal = { rc.right - S(115), y, rc.right - S(14), y + h };
-                        DrawTextW(memDC, g_mainItems[i].value, -1, &rVal, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                        AcrylicSurface::QueueText(textCommands, hFontNormal, valueColor,
+                                                  g_mainItems[i].value, rVal,
+                                                  DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
                     }
                     y += h;
                 }
@@ -922,11 +928,13 @@ static LRESULT CALLBACK AcrylicMainWndProc(HWND hWnd, UINT msg, WPARAM wParam, L
             SelectObject(memDC, oldFont);
             SelectObject(memDC, oldPen);
             SelectObject(memDC, oldBrush);
+
+            AcrylicSurface::Prepare(surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::DrawTextCommands(surface, textCommands);
             DeleteObject(hFontNormal);
             DeleteObject(hFontBold);
             DeleteObject(hFontSub);
-
-            AcrylicSurface::Present(hdc, surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::PresentPrepared(hdc, surface, bgCol);
             AcrylicSurface::Destroy(surface);
 
             EndPaint(hWnd, &ps);

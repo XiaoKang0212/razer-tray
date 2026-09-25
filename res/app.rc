@@ -5,8 +5,8 @@
 2 RCDATA "logo_mask.bin"
 
 1 VERSIONINFO
-FILEVERSION 1,2,6,0
-PRODUCTVERSION 1,2,6,0
+FILEVERSION 1,2,7,0
+PRODUCTVERSION 1,2,7,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS 0x40004L
@@ -19,23 +19,23 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Razer Tray Community"
             VALUE "FileDescription", "razer-tray"
-            VALUE "FileVersion", "1.2.6.0"
+            VALUE "FileVersion", "1.2.7.0"
             VALUE "InternalName", "razer-tray"
             VALUE "LegalCopyright", "Copyright (C) 2026"
             VALUE "OriginalFilename", "razer-tray.exe"
             VALUE "ProductName", "razer-tray"
-            VALUE "ProductVersion", "1.2.6.0"
+            VALUE "ProductVersion", "1.2.7.0"
         END
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "Razer Tray Community"
             VALUE "FileDescription", "razer-tray"
-            VALUE "FileVersion", "1.2.6.0"
+            VALUE "FileVersion", "1.2.7.0"
             VALUE "InternalName", "razer-tray"
             VALUE "LegalCopyright", "Copyright (C) 2026"
             VALUE "OriginalFilename", "razer-tray.exe"
             VALUE "ProductName", "razer-tray"
-            VALUE "ProductVersion", "1.2.6.0"
+            VALUE "ProductVersion", "1.2.7.0"
         END
     END
     BLOCK "VarFileInfo"

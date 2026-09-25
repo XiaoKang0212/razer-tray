@@ -199,33 +199,28 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
             RECT rcBox = rc;
             InflateRect(&rcBox, -S(2), -S(2));
-            SetBkMode(memDC, TRANSPARENT);
-
             const bool hasLine3 = (g_textLine3[0] != 0);
+            AcrylicSurface::TextCommands textCommands;
 
             HFONT hFontBig = CreateFontW(
                 -S(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 ANTIALIASED_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
-            HGDIOBJ oldFont = SelectObject(memDC, hFontBig);
-            SetTextColor(memDC, titleCol);
-
             RECT rcTop = rcBox;
             rcTop.top = rcBox.top + S(8);
             rcTop.bottom = rcTop.top + S(26);
-            DrawTextW(memDC, g_textLine1, -1, &rcTop, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            AcrylicSurface::QueueText(textCommands, hFontBig, titleCol, g_textLine1,
+                                      rcTop, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
             HFONT hFontMid = CreateFontW(
                 -S(13), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                 ANTIALIASED_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
-            SelectObject(memDC, hFontMid);
-            SetTextColor(memDC, subCol);
-
             RECT rcMid = rcBox;
             rcMid.top = rcTop.bottom + S(2);
             rcMid.bottom = rcMid.top + S(22);
-            DrawTextW(memDC, g_textLine2, -1, &rcMid, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            AcrylicSurface::QueueText(textCommands, hFontMid, subCol, g_textLine2,
+                                      rcMid, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
             HFONT hFontSub = NULL;
             if (hasLine3) {
@@ -233,17 +228,16 @@ static LRESULT CALLBACK OsdWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
                     -S(12), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
                     DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                     ANTIALIASED_QUALITY, VARIABLE_PITCH, L"Microsoft YaHei UI");
-                SelectObject(memDC, hFontSub);
-                SetTextColor(memDC, accentCol);
-
                 RECT rcBot = rcBox;
                 rcBot.top = rcMid.bottom + S(2);
                 rcBot.bottom = rcBot.top + S(22);
-                DrawTextW(memDC, g_textLine3, -1, &rcBot, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                AcrylicSurface::QueueText(textCommands, hFontSub, accentCol, g_textLine3,
+                                          rcBot, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
 
-            SelectObject(memDC, oldFont);
-            AcrylicSurface::Present(hdc, surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::Prepare(surface, bgCol, g_acrylicEnabled);
+            AcrylicSurface::DrawTextCommands(surface, textCommands);
+            AcrylicSurface::PresentPrepared(hdc, surface, bgCol);
             AcrylicSurface::Destroy(surface);
             DeleteObject(hFontBig);
             DeleteObject(hFontMid);
